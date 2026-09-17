@@ -1,40 +1,34 @@
-# Build the controller binary on an s390x Go builder, then copy into a
-# minimal UBI9 runtime image.
+# Host-build approach for s390x IBM Z KVM provider.
 #
-# Two-stage build keeps the final image small — no Go toolchain in production.
-# Base images sourced from Red Hat registry per IBM security policy.
+# The manager binary is compiled directly on the s390x RHEL host
+# (which has libvirt-devel + gcc available) and then copied into
+# a minimal UBI9 runtime image.
+#
+# Build steps (run on the s390x host before podman build):
+#   1. CGO_ENABLED=1 GOOS=linux GOARCH=s390x go build -o bin/manager ./main.go
+#   2. podman build -t quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm:v0.1.0 .
+#   3. podman push quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm:v0.1.0
+#
+# Why host-build?
+#   libvirt-devel (C headers for CGo) is only available via the
+#   CodeReady Linux Builder repo on a subscribed RHEL s390x host.
+#   It is not available inside UBI9 builder containers.
+#
+# Base image sourced from Red Hat registry per IBM security policy.
 
-# ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM registry.access.redhat.com/ubi9/go-toolset:latest AS builder
-
-USER root
-RUN dnf install -y libvirt-devel pkgconfig && dnf clean all
-
-WORKDIR /workspace
-
-# Cache dependency download as a separate layer — only re-runs when go.mod/go.sum change.
-COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy the rest of the source and build.
-COPY . .
-
-# CGO_ENABLED=1 is required for libvirt.org/go/libvirt (uses cgo to call libvirt C library).
-# GOARCH=s390x targets IBM Z.
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=s390x \
-    go build -a -o manager ./main.go
-
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+# libvirt-libs provides the libvirt.so shared library that the
+# manager binary is dynamically linked against at runtime.
+# openssh-clients provides ssh/scp used by the libvirt SSH transport.
+RUN microdnf install -y libvirt-libs openssh-clients && \
+    microdnf clean all
 
 WORKDIR /
 
-# libvirt client library is required at runtime for cgo bindings.
-# Install only the client — not the full libvirt daemon.
-RUN microdnf install -y libvirt-libs && microdnf clean all
-
-# Copy the compiled binary from the builder stage.
-COPY --from=builder /workspace/manager .
+# Copy the pre-compiled manager binary from the host build.
+# The binary must exist at bin/manager before running podman build.
+COPY bin/manager /manager
 
 # Run as non-root user (UID 65532) per IBM security policy.
 USER 65532:65532
