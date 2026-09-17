@@ -1,0 +1,83 @@
+# Compact (3-node) cluster template for zkvm
+# ────────────────────────────────────────────
+# 3 control-plane nodes, 0 workers.
+# All 3 VMs are created inside ONE KVM host LPAR.
+# Fill in all values marked with <REPLACE>.
+# Apply with: kubectl apply -f compact.yaml --kubeconfig <bootstrap-kubeconfig>
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMCluster
+metadata:
+  name: <REPLACE-cluster-name>
+  namespace: default
+spec:
+  kvmHost: "<REPLACE-kvm-host-ip>"                               # IP of the KVM host LPAR
+  sshUser: "root"                                                # SSH user for KVM host
+  sshKeySecretRef:
+    name: "zkvm-ssh-key"                                         # Secret containing ssh-privatekey
+  storagePool: "default"                                          # virsh pool-list --all
+  networkBridge: "virbr0"                                        # Linux bridge interface (e.g. virbr0 for NAT)
+  kernelPath: "/var/www/html/agent.s390x-vmlinuz"                # absolute path on KVM host
+  initrdPath: "/var/www/html/agent.s390x-initrd.img"            # absolute path on KVM host
+  controlPlaneEndpoint:
+    host: "<REPLACE-api-vip-or-first-cp-ip>"                     # API server VIP or first CP node IP
+    port: 6443
+
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: <REPLACE-cluster-name>
+  namespace: default
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks: ["10.128.0.0/14"]
+    services:
+      cidrBlocks: ["172.30.0.0/16"]
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: ZKVMCluster
+    name: <REPLACE-cluster-name>
+    namespace: default
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    kind: KubeadmControlPlane
+    name: <REPLACE-cluster-name>-cp
+    namespace: default
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMMachineTemplate
+metadata:
+  name: <REPLACE-cluster-name>-cp-template
+  namespace: default
+spec:
+  template:
+    spec:
+      vcpus: 4           # minimum 4 vCPUs per control-plane node
+      memoryGB: 16       # minimum 16 GB RAM per control-plane node
+      diskGB: 120        # minimum 120 GB disk per control-plane node
+
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: <REPLACE-cluster-name>-cp
+  namespace: default
+spec:
+  replicas: 3            # 3 = compact (change to 1 for SNO)
+  version: "v1.29.3"
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+      kind: ZKVMMachineTemplate
+      name: <REPLACE-cluster-name>-cp-template
+      namespace: default
+  kubeadmConfigSpec:
+    initConfiguration:
+      nodeRegistration:
+        criSocket: unix:///var/run/crio/crio.sock
+    joinConfiguration:
+      nodeRegistration:
+        criSocket: unix:///var/run/crio/crio.sock

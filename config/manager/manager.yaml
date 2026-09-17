@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-api-provider-zkvm-controller-manager
+  namespace: capi-zkvm-system
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: cluster-api-provider-zkvm
+    app.kubernetes.io/component: controller-manager
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      # Run as non-root for security compliance.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      serviceAccountName: cluster-api-provider-zkvm-controller-manager
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: manager
+          # Image is substituted by kustomize at deploy time using the IMG variable.
+          image: cluster-api-provider-zkvm:dev
+          imagePullPolicy: IfNotPresent
+          command:
+            - /manager
+          args:
+            - --leader-elect
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          ports:
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            - containerPort: 8081
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            # SSH user for libvirt connection — defaults to root if not set.
+            - name: OCPZ_KVM_USER
+              valueFrom:
+                secretKeyRef:
+                  name: zkvm-credentials
+                  key: kvm-user
+                  optional: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true

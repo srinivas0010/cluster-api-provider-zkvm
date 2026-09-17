@@ -1,0 +1,52 @@
+---
+# ClusterRole grants the controller the permissions it needs to reconcile
+# ZKVMCluster, ZKVMMachine, and related CAPI core objects.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-api-provider-zkvm-manager-role
+rules:
+  # ZKVMCluster — full control
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmclusters"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmclusters/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmclusters/finalizers"]
+    verbs: ["update"]
+
+  # ZKVMMachine — full control
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmmachines"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmmachines/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmmachines/finalizers"]
+    verbs: ["update"]
+
+  # ZKVMMachineTemplate — read only (templates are not mutated by the controller)
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["zkvmmachinetemplates"]
+    verbs: ["get", "list", "watch"]
+
+  # CAPI core — read only (controller reads Cluster and Machine to get owner references)
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["clusters", "clusters/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["machines", "machines/status"]
+    verbs: ["get", "list", "watch"]
+
+  # Secrets — read only (bootstrap data secrets for ignition URLs)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+
+  # Events — write (controller posts events for important state changes)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]

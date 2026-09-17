@@ -1,0 +1,123 @@
+/*
+Copyright 2024 IBM Corporation.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+)
+
+// ZKVMClusterSpec defines the desired state of ZKVMCluster.
+// It describes the KVM host environment that will back a CAPI-managed cluster.
+type ZKVMClusterSpec struct {
+	// KVMHost is the hostname or IP address of the KVM host LPAR.
+	// The controller connects here via: qemu+ssh://<user>@<KVMHost>/system
+	// +kubebuilder:validation:Required
+	KVMHost string `json:"kvmHost"`
+
+	// SSHUser is the username used to SSH into the KVM host (e.g. "root").
+	// +optional
+	SSHUser string `json:"sshUser,omitempty"`
+
+	// SSHKeySecretRef is a reference to a Secret containing the SSH private key
+	// used to authenticate to the KVM host. The secret must contain key "ssh-privatekey".
+	// +optional
+	SSHKeySecretRef *corev1.SecretReference `json:"sshKeySecretRef,omitempty"`
+
+	// StoragePool is the name of the libvirt storage pool where VM disk images
+	// (qcow2) will be created. Must already exist on the KVM host.
+	// Verify with: virsh pool-list --all
+	// +kubebuilder:validation:Required
+	StoragePool string `json:"storagePool"`
+
+	// NetworkBridge is the name of the Linux bridge interface on the KVM host
+	// that VM virtual NICs will be attached to.
+	// Must be a bridge connected to the physical network (not virbr0/NAT).
+	// Verify with: ip link show <bridge>
+	// +kubebuilder:validation:Required
+	NetworkBridge string `json:"networkBridge"`
+
+	// ControlPlaneEndpoint is the IP and port of the Kubernetes API server
+	// for the target cluster. This is the IP of the first control-plane VM.
+	// +kubebuilder:validation:Required
+	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint"`
+
+	// KernelPath is the absolute path on the KVM host to the s390x kernel image
+	// used for direct-kernel boot of all VMs in this cluster.
+	// Typically served by the bastion HTTPD, e.g. "/var/www/html/agent.s390x-vmlinuz".
+	// All VMs in the cluster boot the same kernel image.
+	// +kubebuilder:validation:Required
+	KernelPath string `json:"kernelPath"`
+
+	// InitrdPath is the absolute path on the KVM host to the initrd image
+	// used for direct-kernel boot of all VMs in this cluster.
+	// Typically served by the bastion HTTPD, e.g. "/var/www/html/agent.s390x-initrd.img".
+	// All VMs in the cluster use the same initrd image.
+	// +kubebuilder:validation:Required
+	InitrdPath string `json:"initrdPath"`
+}
+
+// ZKVMClusterStatus defines the observed state of ZKVMCluster.
+type ZKVMClusterStatus struct {
+	// Ready indicates whether the KVM host is reachable and the storage pool
+	// and network bridge have been validated. Set to true by the reconciler
+	// once all checks pass. CAPI core waits for this before creating machines.
+	// +optional
+	Ready bool `json:"ready,omitempty"`
+
+	// FailureReason contains a short machine-readable string explaining why
+	// the cluster failed to reach the Ready state.
+	// +optional
+	FailureReason *string `json:"failureReason,omitempty"`
+
+	// FailureMessage contains a human-readable description of the failure.
+	// +optional
+	FailureMessage *string `json:"failureMessage,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:path=zkvmclusters,scope=Namespaced,categories=cluster-api
+// +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels['cluster\\.x-k8s\\.io/cluster-name']"
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready"
+// +kubebuilder:printcolumn:name="KVMHost",type="string",JSONPath=".spec.kvmHost"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+
+// ZKVMCluster is the schema for the zkvmclusters API.
+// It represents the KVM host environment (LPAR + libvirt) that backs a cluster.
+// One ZKVMCluster exists per target cluster.
+type ZKVMCluster struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   ZKVMClusterSpec   `json:"spec,omitempty"`
+	Status ZKVMClusterStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// ZKVMClusterList contains a list of ZKVMCluster objects.
+type ZKVMClusterList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []ZKVMCluster `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&ZKVMCluster{}, &ZKVMClusterList{})
+}

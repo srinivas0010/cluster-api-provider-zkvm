@@ -1,0 +1,14 @@
+namespace: capi-zkvm-system
+
+resources:
+  - ../crd/bases
+  - ../rbac/role.yaml
+  - ../rbac/role_binding.yaml
+  - ../manager
+
+# Image substitution — override at deploy time with:
+#   IMG=yourregistry/cluster-api-provider-zkvm:v0.1.0 make deploy
+images:
+  - name: cluster-api-provider-zkvm
+    newName: cluster-api-provider-zkvm
+    newTag: dev

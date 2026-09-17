@@ -1,0 +1,9 @@
+resources:
+  - manager.yaml
+
+# Substitute the image tag at deploy time.
+# Usage: IMG=registry/image:tag make deploy
+images:
+  - name: cluster-api-provider-zkvm
+    newName: cluster-api-provider-zkvm
+    newTag: dev
