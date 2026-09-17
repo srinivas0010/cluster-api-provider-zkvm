@@ -7,6 +7,9 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 FROM registry.access.redhat.com/ubi9/go-toolset:latest AS builder
 
+USER root
+RUN dnf install -y libvirt-devel pkgconfig && dnf clean all
+
 WORKDIR /workspace
 
 # Cache dependency download as a separate layer — only re-runs when go.mod/go.sum change.
