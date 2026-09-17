@@ -5,7 +5,7 @@
 # Base images sourced from Red Hat registry per IBM security policy.
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM registry.redhat.io/ubi9/go-toolset:1.21 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:latest AS builder
 
 WORKDIR /workspace
 
@@ -22,7 +22,7 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=s390x \
     go build -a -o manager ./main.go
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM registry.redhat.io/ubi9/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 WORKDIR /
 

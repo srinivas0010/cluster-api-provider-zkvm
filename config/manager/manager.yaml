@@ -25,8 +25,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          # Image is substituted by kustomize at deploy time using the IMG variable.
-          image: cluster-api-provider-zkvm:dev
+          image: quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm:v0.1.0
           imagePullPolicy: IfNotPresent
           command:
             - /manager

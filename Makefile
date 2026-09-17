@@ -11,7 +11,7 @@
 #   make test            — run unit tests
 
 # Image name and tag — override with: IMG=myregistry/myimage:tag make docker-build
-IMG ?= cluster-api-provider-zkvm:dev
+IMG ?= quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm:v0.1.0
 
 # controller-gen version to use for CRD/deepcopy generation.
 CONTROLLER_GEN_VERSION ?= v0.14.0
