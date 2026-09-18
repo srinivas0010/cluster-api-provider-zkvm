@@ -1,6 +1,7 @@
 namespace: capi-zkvm-system
 
 resources:
+  - namespace.yaml
   - ../crd/bases
   - ../rbac
   - ../manager
