@@ -232,14 +232,15 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	}
 
 	if !domExists {
-		// Retrieve bootstrap data (ignition URL injected via KubeadmConfig).
-		// The bootstrap URL is stored in the machine's bootstrap data secret.
-		// For the zkvm CAPI flow, kernel cmdline carries the ignition URL.
+		// Build the per-node ignition URL from the cluster's IgnitionBaseURL.
+		// The bastion HTTPD serves per-node ignition files at:
+		//   <IgnitionBaseURL>/<domainName>.ign
+		// e.g. http://192.168.152.2:8080/ignition/compact-test-cp-0.ign
 		ignitionURL := ""
-		if machine.Spec.Bootstrap.DataSecretName != nil {
+		if zkvmCluster.Spec.IgnitionBaseURL != "" && machine.Spec.Bootstrap.DataSecretName != nil {
 			ignitionURL = fmt.Sprintf(
-				"ignition.config.url=http://%s:8080/ignition/%s.ign",
-				zkvmCluster.Spec.KVMHost,
+				"ignition.config.url=%s/%s.ign",
+				zkvmCluster.Spec.IgnitionBaseURL,
 				domainName,
 			)
 		}
@@ -354,7 +355,43 @@ func (r *ZKVMMachineReconciler) reconcileDelete(
 ) (ctrl.Result, error) {
 	log.Info("Reconciling ZKVMMachine deletion", "machine", zkvmMachine.Name)
 
-	kvm, err := zkvmlibvirt.NewClient(zkvmCluster.Spec.KVMHost)
+	// Read SSH key secret — same logic as reconcileNormal.
+	// Using NewClient() here would ignore SSH key auth and fail on hosts
+	// that require key-based authentication (the common case).
+	var keyPath string
+	if zkvmCluster.Spec.SSHKeySecretRef != nil {
+		secretKey := client.ObjectKey{
+			Namespace: zkvmCluster.Namespace,
+			Name:      zkvmCluster.Spec.SSHKeySecretRef.Name,
+		}
+		var secret corev1.Secret
+		if err := r.Get(ctx, secretKey, &secret); err != nil {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler delete: get SSHKeySecret: %w", err)
+		}
+		sshKey, ok := secret.Data["ssh-privatekey"]
+		if !ok || len(sshKey) == 0 {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler delete: secret %q missing key 'ssh-privatekey'", secretKey.Name)
+		}
+		tmpFile, err := os.CreateTemp("", "zkvm-ssh-*")
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler delete: create temp SSH key: %w", err)
+		}
+		if err := os.Chmod(tmpFile.Name(), 0600); err != nil {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler delete: chmod temp SSH key: %w", err)
+		}
+		if _, err := tmpFile.Write(sshKey); err != nil {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler delete: write temp SSH key: %w", err)
+		}
+		tmpFile.Close()
+		keyPath = tmpFile.Name()
+		defer os.Remove(keyPath)
+	}
+
+	kvm, err := zkvmlibvirt.NewClientWithAuth(zkvmlibvirt.ClientOptions{
+		KVMHost: zkvmCluster.Spec.KVMHost,
+		SSHUser: zkvmCluster.Spec.SSHUser,
+		KeyPath: keyPath,
+	})
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler delete: connect to KVM host: %w", err)
 	}

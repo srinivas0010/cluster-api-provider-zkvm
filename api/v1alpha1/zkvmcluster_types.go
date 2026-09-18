@@ -59,17 +59,27 @@ type ZKVMClusterSpec struct {
 
 	// KernelPath is the absolute path on the KVM host to the s390x kernel image
 	// used for direct-kernel boot of all VMs in this cluster.
-	// Typically served by the bastion HTTPD, e.g. "/var/www/html/agent.s390x-vmlinuz".
+	// Populated by the installer's UploadArtifacts step, e.g. "/var/lib/libvirt/boot/agent.s390x-kernel.img".
 	// All VMs in the cluster boot the same kernel image.
 	// +kubebuilder:validation:Required
 	KernelPath string `json:"kernelPath"`
 
 	// InitrdPath is the absolute path on the KVM host to the initrd image
 	// used for direct-kernel boot of all VMs in this cluster.
-	// Typically served by the bastion HTTPD, e.g. "/var/www/html/agent.s390x-initrd.img".
+	// Populated by the installer's UploadArtifacts step, e.g. "/var/lib/libvirt/boot/agent.s390x-initrd.img".
 	// All VMs in the cluster use the same initrd image.
 	// +kubebuilder:validation:Required
 	InitrdPath string `json:"initrdPath"`
+
+	// IgnitionBaseURL is the base URL from which nodes fetch their ignition
+	// configuration during first boot.  The controller appends "/<domainName>.ign"
+	// to form the per-node kernel cmdline argument:
+	//   ignition.config.url=<IgnitionBaseURL>/<domainName>.ign
+	//
+	// Set this to the bastion HTTPD address, e.g. "http://192.168.152.2:8080/ignition".
+	// The bastion HTTPD must serve the per-node ignition files at that path.
+	// +kubebuilder:validation:Required
+	IgnitionBaseURL string `json:"ignitionBaseURL"`
 }
 
 // ZKVMClusterStatus defines the observed state of ZKVMCluster.

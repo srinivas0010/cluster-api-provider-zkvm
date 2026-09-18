@@ -106,6 +106,20 @@ func (r *ZKVMCluster) validate(old *ZKVMCluster) (admission.Warnings, error) {
 		))
 	}
 
+	// IgnitionBaseURL must be a non-empty http/https URL.
+	if strings.TrimSpace(r.Spec.IgnitionBaseURL) == "" {
+		errs = append(errs, field.Required(
+			field.NewPath("spec", "ignitionBaseURL"),
+			"ignitionBaseURL must be a non-empty URL pointing to the bastion HTTPD ignition directory",
+		))
+	} else if !strings.HasPrefix(r.Spec.IgnitionBaseURL, "http://") && !strings.HasPrefix(r.Spec.IgnitionBaseURL, "https://") {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec", "ignitionBaseURL"),
+			r.Spec.IgnitionBaseURL,
+			"ignitionBaseURL must start with http:// or https://",
+		))
+	}
+
 	// ControlPlaneEndpoint host must be non-empty.
 	if strings.TrimSpace(r.Spec.ControlPlaneEndpoint.Host) == "" {
 		errs = append(errs, field.Required(

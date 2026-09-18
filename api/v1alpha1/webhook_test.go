@@ -28,11 +28,12 @@ func validCluster() *ZKVMCluster {
 	return &ZKVMCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster", Namespace: "default"},
 		Spec: ZKVMClusterSpec{
-			KVMHost:       "kvm-host.example.com",
-			StoragePool:   "default",
-			NetworkBridge: "br0",
-			KernelPath:    "/var/www/html/agent.s390x-vmlinuz",
-			InitrdPath:    "/var/www/html/agent.s390x-initrd.img",
+			KVMHost:         "kvm-host.example.com",
+			StoragePool:     "default",
+			NetworkBridge:   "br0",
+			KernelPath:      "/var/lib/libvirt/boot/agent.s390x-kernel.img",
+			InitrdPath:      "/var/lib/libvirt/boot/agent.s390x-initrd.img",
+			IgnitionBaseURL: "http://192.168.152.2:8080/ignition",
 			ControlPlaneEndpoint: clusterv1.APIEndpoint{
 				Host: "10.0.0.10",
 				Port: 6443,
@@ -88,6 +89,16 @@ func TestZKVMClusterWebhook_MissingFields(t *testing.T) {
 			name:    "empty controlPlaneEndpoint host",
 			mutate:  func(c *ZKVMCluster) { c.Spec.ControlPlaneEndpoint.Host = "" },
 			wantErr: "controlPlaneEndpoint",
+		},
+		{
+			name:    "empty ignitionBaseURL",
+			mutate:  func(c *ZKVMCluster) { c.Spec.IgnitionBaseURL = "" },
+			wantErr: "ignitionBaseURL",
+		},
+		{
+			name:    "ignitionBaseURL without http scheme",
+			mutate:  func(c *ZKVMCluster) { c.Spec.IgnitionBaseURL = "192.168.152.2:8080/ignition" },
+			wantErr: "ignitionBaseURL",
 		},
 	}
 
