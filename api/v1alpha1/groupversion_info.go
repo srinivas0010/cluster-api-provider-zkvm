@@ -1,5 +1,7 @@
 
 
+// +groupName=infrastructure.cluster.x-k8s.io
+
 // Package v1alpha1 contains the v1alpha1 API types for the zkvm infrastructure
 // provider.
 //
