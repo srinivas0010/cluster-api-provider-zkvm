@@ -1,0 +1,150 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: zkvmmachines.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ZKVMMachine
+    listKind: ZKVMMachineList
+    plural: zkvmmachines
+    singular: zkvmmachine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.labels['cluster\.x-k8s\.io/cluster-name']
+      name: Cluster
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: string
+    - jsonPath: .spec.providerID
+      name: ProviderID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZKVMMachine is the schema for the zkvmmachines API.
+          Each ZKVMMachine maps 1:1 to a libvirt KVM virtual machine on the KVM host.
+          Created automatically by KubeadmControlPlane/MachineDeployment — not by users.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ZKVMMachineSpec defines the desired state of ZKVMMachine.
+              Each ZKVMMachine corresponds to exactly one KVM virtual machine on the KVM host.
+              ZKVMMachine objects are created automatically by KubeadmControlPlane or
+              MachineDeployment — users do not create them directly.
+            properties:
+              diskGB:
+                description: |-
+                  DiskGB is the size of the root disk image (qcow2) in gigabytes.
+                  Minimum 120 for control-plane nodes, 50 for workers.
+                minimum: 1
+                type: integer
+              gateway:
+                description: Gateway is the network gateway for static IP configuration.
+                type: string
+              ipAddress:
+                description: IPAddress is the static IP to assign to the VM if static
+                  NAT IP allocation is used.
+                type: string
+              memoryGB:
+                description: |-
+                  MemoryGB is the amount of RAM in gigabytes to assign to the VM.
+                  Minimum 16 for control-plane nodes, 8 for workers.
+                minimum: 1
+                type: integer
+              nameserver:
+                description: Nameserver is the DNS nameserver for static IP configuration.
+                type: string
+              netmask:
+                description: Netmask is the network mask for static IP configuration
+                  (e.g. "255.255.255.0").
+                type: string
+              providerID:
+                description: |-
+                  ProviderID is the unique identifier for this machine in the format
+                  "zkvm://<kvmHost>/<domainName>". Set by the reconciler after the VM
+                  is created. Used by the Node object to match back to this Machine.
+                type: string
+              vcpus:
+                description: |-
+                  VCPUs is the number of virtual CPUs to assign to the VM.
+                  Minimum 4 for control-plane nodes, 2 for workers.
+                minimum: 1
+                type: integer
+            required:
+            - diskGB
+            - memoryGB
+            - vcpus
+            type: object
+          status:
+            description: ZKVMMachineStatus defines the observed state of ZKVMMachine.
+            properties:
+              addresses:
+                description: |-
+                  Addresses holds the IP addresses assigned to this VM.
+                  Populated after the VM is created and its NIC is assigned.
+                items:
+                  description: MachineAddress contains information for the node's
+                    address.
+                  properties:
+                    address:
+                      description: The machine address.
+                      type: string
+                    type:
+                      description: Machine address type, one of Hostname, ExternalIP,
+                        InternalIP, ExternalDNS or InternalDNS.
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              failureMessage:
+                description: FailureMessage contains a human-readable explanation
+                  of the failure.
+                type: string
+              failureReason:
+                description: |-
+                  FailureReason contains a short machine-readable string describing why
+                  this machine failed (e.g. "VolumeCreateFailed", "DomainStartFailed").
+                type: string
+              ready:
+                description: |-
+                  Ready indicates whether the VM has been created and has joined the cluster.
+                  Set to true by the reconciler after DomainCreate succeeds and the node
+                  appears in the target cluster.
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

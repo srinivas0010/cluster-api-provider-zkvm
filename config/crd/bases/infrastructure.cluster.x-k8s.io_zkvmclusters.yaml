@@ -1,0 +1,171 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: zkvmclusters.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ZKVMCluster
+    listKind: ZKVMClusterList
+    plural: zkvmclusters
+    singular: zkvmcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.labels['cluster\.x-k8s\.io/cluster-name']
+      name: Cluster
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: string
+    - jsonPath: .spec.kvmHost
+      name: KVMHost
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZKVMCluster is the schema for the zkvmclusters API.
+          It represents the KVM host environment (LPAR + libvirt) that backs a cluster.
+          One ZKVMCluster exists per target cluster.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ZKVMClusterSpec defines the desired state of ZKVMCluster.
+              It describes the KVM host environment that will back a CAPI-managed cluster.
+            properties:
+              controlPlaneEndpoint:
+                description: |-
+                  ControlPlaneEndpoint is the IP and port of the Kubernetes API server
+                  for the target cluster. This is the IP of the first control-plane VM.
+                properties:
+                  host:
+                    description: The hostname on which the API server is serving.
+                    type: string
+                  port:
+                    description: The port on which the API server is serving.
+                    format: int32
+                    type: integer
+                required:
+                - host
+                - port
+                type: object
+              ignitionBaseURL:
+                description: |-
+                  IgnitionBaseURL is the base URL from which nodes fetch their ignition
+                  configuration during first boot.  The controller appends "/<domainName>.ign"
+                  to form the per-node kernel cmdline argument:
+                    ignition.config.url=<IgnitionBaseURL>/<domainName>.ign
+
+                  Set this to the bastion HTTPD address, e.g. "http://192.168.152.2:8080/ignition".
+                  The bastion HTTPD must serve the per-node ignition files at that path.
+                type: string
+              initrdPath:
+                description: |-
+                  InitrdPath is the absolute path on the KVM host to the initrd image
+                  used for direct-kernel boot of all VMs in this cluster.
+                  Populated by the installer's UploadArtifacts step, e.g. "/var/lib/libvirt/boot/agent.s390x-initrd.img".
+                  All VMs in the cluster use the same initrd image.
+                type: string
+              kernelPath:
+                description: |-
+                  KernelPath is the absolute path on the KVM host to the s390x kernel image
+                  used for direct-kernel boot of all VMs in this cluster.
+                  Populated by the installer's UploadArtifacts step, e.g. "/var/lib/libvirt/boot/agent.s390x-kernel.img".
+                  All VMs in the cluster boot the same kernel image.
+                type: string
+              kvmHost:
+                description: |-
+                  KVMHost is the hostname or IP address of the KVM host LPAR.
+                  The controller connects here via: qemu+ssh://<user>@<KVMHost>/system
+                type: string
+              networkBridge:
+                description: |-
+                  NetworkBridge is the name of the Linux bridge interface on the KVM host
+                  that VM virtual NICs will be attached to.
+                  Must be a bridge connected to the physical network (not virbr0/NAT).
+                  Verify with: ip link show <bridge>
+                type: string
+              sshKeySecretRef:
+                description: |-
+                  SSHKeySecretRef is a reference to a Secret containing the SSH private key
+                  used to authenticate to the KVM host. The secret must contain key "ssh-privatekey".
+                properties:
+                  name:
+                    description: name is unique within a namespace to reference a
+                      secret resource.
+                    type: string
+                  namespace:
+                    description: namespace defines the space within which the secret
+                      name must be unique.
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              sshUser:
+                description: SSHUser is the username used to SSH into the KVM host
+                  (e.g. "root").
+                type: string
+              storagePool:
+                description: |-
+                  StoragePool is the name of the libvirt storage pool where VM disk images
+                  (qcow2) will be created. Must already exist on the KVM host.
+                  Verify with: virsh pool-list --all
+                type: string
+            required:
+            - controlPlaneEndpoint
+            - ignitionBaseURL
+            - initrdPath
+            - kernelPath
+            - kvmHost
+            - networkBridge
+            - storagePool
+            type: object
+          status:
+            description: ZKVMClusterStatus defines the observed state of ZKVMCluster.
+            properties:
+              failureMessage:
+                description: FailureMessage contains a human-readable description
+                  of the failure.
+                type: string
+              failureReason:
+                description: |-
+                  FailureReason contains a short machine-readable string explaining why
+                  the cluster failed to reach the Ready state.
+                type: string
+              ready:
+                description: |-
+                  Ready indicates whether the KVM host is reachable and the storage pool
+                  and network bridge have been validated. Set to true by the reconciler
+                  once all checks pass. CAPI core waits for this before creating machines.
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

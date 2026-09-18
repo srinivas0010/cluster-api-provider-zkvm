@@ -1,0 +1,114 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: zkvmmachinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ZKVMMachineTemplate
+    listKind: ZKVMMachineTemplateList
+    plural: zkvmmachinetemplates
+    singular: zkvmmachinetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZKVMMachineTemplate is the schema for the zkvmmachinetemplates API.
+          It is a reusable blueprint that KubeadmControlPlane and MachineDeployment
+          reference via machineTemplate.infrastructureRef.
+          Defines the VM size (vcpus, memoryGB, diskGB) for a group of cluster nodes.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ZKVMMachineTemplateSpec defines the desired state of ZKVMMachineTemplate.
+            properties:
+              template:
+                description: Template is the ZKVMMachineSpec blueprint.
+                properties:
+                  spec:
+                    description: |-
+                      Spec is the ZKVMMachineSpec that all machines created from this template
+                      will use. Fields here are copied directly into each ZKVMMachine created.
+                    properties:
+                      diskGB:
+                        description: |-
+                          DiskGB is the size of the root disk image (qcow2) in gigabytes.
+                          Minimum 120 for control-plane nodes, 50 for workers.
+                        minimum: 1
+                        type: integer
+                      gateway:
+                        description: Gateway is the network gateway for static IP
+                          configuration.
+                        type: string
+                      ipAddress:
+                        description: IPAddress is the static IP to assign to the VM
+                          if static NAT IP allocation is used.
+                        type: string
+                      memoryGB:
+                        description: |-
+                          MemoryGB is the amount of RAM in gigabytes to assign to the VM.
+                          Minimum 16 for control-plane nodes, 8 for workers.
+                        minimum: 1
+                        type: integer
+                      nameserver:
+                        description: Nameserver is the DNS nameserver for static IP
+                          configuration.
+                        type: string
+                      netmask:
+                        description: Netmask is the network mask for static IP configuration
+                          (e.g. "255.255.255.0").
+                        type: string
+                      providerID:
+                        description: |-
+                          ProviderID is the unique identifier for this machine in the format
+                          "zkvm://<kvmHost>/<domainName>". Set by the reconciler after the VM
+                          is created. Used by the Node object to match back to this Machine.
+                        type: string
+                      vcpus:
+                        description: |-
+                          VCPUs is the number of virtual CPUs to assign to the VM.
+                          Minimum 4 for control-plane nodes, 2 for workers.
+                        minimum: 1
+                        type: integer
+                    required:
+                    - diskGB
+                    - memoryGB
+                    - vcpus
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

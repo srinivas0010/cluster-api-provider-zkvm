@@ -1,0 +1,4 @@
+resources:
+- infrastructure.cluster.x-k8s.io_zkvmclusters.yaml
+- infrastructure.cluster.x-k8s.io_zkvmmachines.yaml
+- infrastructure.cluster.x-k8s.io_zkvmmachinetemplates.yaml
