@@ -117,16 +117,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Register admission webhooks ───────────────────────────────────────────
-	if err := (&infrav1.ZKVMCluster{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create ZKVMCluster webhook")
-		os.Exit(1)
-	}
-	if err := (&infrav1.ZKVMMachine{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create ZKVMMachine webhook")
-		os.Exit(1)
-	}
-
 	// ── Health checks ─────────────────────────────────────────────────────────
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
