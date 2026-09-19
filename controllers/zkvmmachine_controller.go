@@ -232,27 +232,16 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	}
 
 	if !domExists {
-		// Build the per-node ignition URL from the cluster's IgnitionBaseURL.
-		// The bastion HTTPD serves per-node ignition files at:
-		//   <IgnitionBaseURL>/<domainName>.ign
-		// e.g. http://192.168.152.2:8080/ignition/compact-test-cp-0.ign
-		ignitionURL := ""
-		if zkvmCluster.Spec.IgnitionBaseURL != "" && machine.Spec.Bootstrap.DataSecretName != nil {
-			ignitionURL = fmt.Sprintf(
-				"ignition.config.url=%s/%s.ign",
-				zkvmCluster.Spec.IgnitionBaseURL,
-				domainName,
-			)
-		}
-
 		// MAC address: derive from machine name deterministically.
 		// Format: 52:54:00:XX:XX:XX — using last 3 bytes of a hash.
 		mac := deriveMACAddress(domainName)
 
-		cmdline := fmt.Sprintf(
-			"%s rd.neednet=1 console=ttysclp0",
-			ignitionURL,
-		)
+		// ABI ignition is embedded inside the initrd (agent.s390x-initrd.img).
+		// Nodes do not need to fetch ignition from an external URL — the
+		// rendezvous agent inside the initrd handles everything.
+		// The kernel cmdline only needs rd.neednet=1 for network bring-up
+		// and static IP args so the node can reach the rendezvous service.
+		cmdline := "rd.neednet=1 console=ttysclp0"
 		if zkvmMachine.Spec.IPAddress != "" {
 			// Format static IP cmdline: ip=<client-ip>::<gw-ip>:<netmask>:<hostname>:<device>:none
 			gw := zkvmMachine.Spec.Gateway
@@ -305,44 +294,29 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		log.Info("VM already running — skipping start", "domain", domainName)
 	}
 
-	// ── Step 4: Set ProviderID ────────────────────────────────────────────────
-	// Bug 2 & 5: Do NOT set Status.Ready=true here.
-	// Ready must only be set true once the CAPI Machine.Status.NodeRef is
-	// populated — meaning the Kubernetes node has actually joined the cluster.
-	// That check is done in the poll below.
-	//
-	// We also attempt to read the VM's MAC so we can populate Status.Addresses
-	// (Bug 5). If the lookup fails we requeue — the VM may not yet have an IP.
+	// ── Step 4: Set ProviderID and mark Ready ────────────────────────────────
+	// With ABI bootstrap (no kubeadm), Machine.Status.NodeRef is never
+	// populated by CAPI bootstrap — OCP's own node lifecycle controller
+	// manages node registration independently. We mark ZKVMMachine Ready
+	// as soon as the libvirt domain is confirmed running. This unblocks the
+	// CAPI Cluster status reconciliation so it reports infrastructure ready.
 	providerID := fmt.Sprintf("zkvm://%s/%s", zkvmCluster.Spec.KVMHost, domainName)
 	zkvmMachine.Spec.ProviderID = &providerID
 
-	// Bug 5: Populate Status.Addresses from the domain's actual MAC/IP.
-	// The libvirt guest-agent (or DHCP lease tables) is queried for the IP.
-	// If not yet available, leave Addresses empty and requeue — CAPI will
-	// tolerate an empty list until the address is known.
-	ip, err := kvm.GetDomainIP(domainName)
-	if err != nil {
-		log.Info("VM IP not yet available — requeuing in 15s", "domain", domainName)
-		return ctrl.Result{RequeueAfter: 15e9 /* 15 seconds */}, nil
-	}
-	zkvmMachine.Status.Addresses = []clusterv1.MachineAddress{
-		{
-			Type:    clusterv1.MachineInternalIP,
-			Address: ip,
-		},
+	// Populate Status.Addresses from the domain's static IP (from spec).
+	// We use the spec IP directly since it is statically assigned — no need
+	// to query libvirt DHCP leases. This is always available immediately.
+	if zkvmMachine.Spec.IPAddress != "" {
+		zkvmMachine.Status.Addresses = []clusterv1.MachineAddress{
+			{
+				Type:    clusterv1.MachineInternalIP,
+				Address: zkvmMachine.Spec.IPAddress,
+			},
+		}
 	}
 
-	// Bug 2: Only mark Ready once the owning CAPI Machine has a NodeRef,
-	// meaning the Kubernetes node has joined the cluster and been linked.
-	if machine.Status.NodeRef != nil {
-		zkvmMachine.Status.Ready = true
-		log.Info("ZKVMMachine ready — node has joined cluster", "domain", domainName, "node", machine.Status.NodeRef.Name)
-	} else {
-		log.Info("Waiting for node to join cluster — requeuing in 30s", "domain", domainName)
-		return ctrl.Result{RequeueAfter: 30e9 /* 30 seconds */}, nil
-	}
-
-	log.Info("ZKVMMachine reconciled successfully", "domain", domainName, "providerID", providerID)
+	zkvmMachine.Status.Ready = true
+	log.Info("ZKVMMachine ready — VM is running", "domain", domainName, "providerID", providerID)
 	return ctrl.Result{}, nil
 }
 

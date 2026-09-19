@@ -138,7 +138,6 @@ spec:
                 type: string
             required:
             - controlPlaneEndpoint
-            - ignitionBaseURL
             - initrdPath
             - kernelPath
             - kvmHost

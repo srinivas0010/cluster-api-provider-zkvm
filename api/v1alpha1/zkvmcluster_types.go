@@ -72,14 +72,11 @@ type ZKVMClusterSpec struct {
 	InitrdPath string `json:"initrdPath"`
 
 	// IgnitionBaseURL is the base URL from which nodes fetch their ignition
-	// configuration during first boot.  The controller appends "/<domainName>.ign"
-	// to form the per-node kernel cmdline argument:
-	//   ignition.config.url=<IgnitionBaseURL>/<domainName>.ign
-	//
-	// Set this to the bastion HTTPD address, e.g. "http://192.168.152.2:8080/ignition".
-	// The bastion HTTPD must serve the per-node ignition files at that path.
-	// +kubebuilder:validation:Required
-	IgnitionBaseURL string `json:"ignitionBaseURL"`
+	// configuration during first boot. Optional — ABI ignition is embedded
+	// in the initrd and does not require an external URL. This field is
+	// preserved for future use cases that may serve per-node ignition files.
+	// +optional
+	IgnitionBaseURL string `json:"ignitionBaseURL,omitempty"`
 }
 
 // ZKVMClusterStatus defines the observed state of ZKVMCluster.
