@@ -90,7 +90,7 @@ func (c *Client) DefineDomain(p DomainCreateParams) error {
   <cpu mode='host-passthrough'/>
 
   <devices>
-    <emulator>/usr/bin/qemu-system-s390x</emulator>
+    <emulator>/usr/libexec/qemu-kvm</emulator>
 
     <!-- Root disk: thin-provisioned qcow2 via virtio -->
     <disk type='file' device='disk'>
