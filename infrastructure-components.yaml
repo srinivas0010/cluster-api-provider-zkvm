@@ -624,8 +624,14 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-dir
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
       serviceAccountName: cluster-api-provider-zkvm-controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+      - emptyDir: {}
+        name: tmp-dir
