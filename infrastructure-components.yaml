@@ -578,12 +578,8 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: true
-          seccompProfile:
-            type: RuntimeDefault
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
-        seccompProfile:
-          type: RuntimeDefault
       serviceAccountName: cluster-api-provider-zkvm-controller-manager
       terminationGracePeriodSeconds: 10
