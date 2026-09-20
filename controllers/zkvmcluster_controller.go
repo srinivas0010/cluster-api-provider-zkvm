@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -88,7 +89,7 @@ func (r *ZKVMClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if cluster == nil {
 		// Owner Cluster not set yet — requeue and wait.
 		log.Info("Owner Cluster not found yet — requeuing")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// ── Set up patch helper so we can patch status at the end ─────────────────
