@@ -69,61 +69,56 @@ type domainXMLDoc struct {
 // Architecture: s390x (IBM Z). Machine type: s390-ccw-virtio.
 // Boot method: direct kernel boot (kernel + initrd + cmdline — no BIOS).
 func (c *Client) DefineDomain(p DomainCreateParams) error {
+	// Memory must be in KiB — libvirt standard unit.
+	memKiB := p.MemoryGB * 1024 * 1024
+
 	domainXML := fmt.Sprintf(`
 <domain type='kvm'>
-  <name>%s</name>
-  <memory unit='GiB'>%d</memory>
-  <currentMemory unit='GiB'>%d</currentMemory>
-  <vcpu placement='static'>%d</vcpu>
+	 <name>%s</name>
+	 <memory unit='KiB'>%d</memory>
+	 <currentMemory unit='KiB'>%d</currentMemory>
+	 <vcpu placement='static'>%d</vcpu>
 
-  <os>
-    <type arch='s390x' machine='s390-ccw-virtio'>hvm</type>
-    <kernel>%s</kernel>
-    <initrd>%s</initrd>
-    <cmdline>%s</cmdline>
-  </os>
+	 <os>
+	   <type arch='s390x' machine='s390-ccw-virtio'>hvm</type>
+	   <kernel>%s</kernel>
+	   <initrd>%s</initrd>
+	   <cmdline>%s</cmdline>
+	 </os>
 
-  <features>
-    <acpi/>
-  </features>
+	 <cpu mode='host-passthrough'/>
 
-  <cpu mode='host-passthrough'/>
+	 <devices>
+	   <emulator>/usr/libexec/qemu-kvm</emulator>
 
-  <devices>
-    <emulator>/usr/libexec/qemu-kvm</emulator>
+	   <disk type='file' device='disk'>
+	     <driver name='qemu' type='qcow2' cache='none' io='native'/>
+	     <source file='%s'/>
+	     <target dev='vda' bus='virtio'/>
+	   </disk>
 
-    <!-- Root disk: thin-provisioned qcow2 via virtio -->
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='qcow2' cache='none' io='native'/>
-      <source file='%s'/>
-      <target dev='vda' bus='virtio'/>
-      <boot order='1'/>
-    </disk>
+	   <interface type='bridge'>
+	     <mac address='%s'/>
+	     <source bridge='%s'/>
+	     <model type='virtio'/>
+	   </interface>
 
-    <!-- Network: virtio NIC attached to the host bridge -->
-    <interface type='bridge'>
-      <mac address='%s'/>
-      <source bridge='%s'/>
-      <model type='virtio'/>
-    </interface>
+	   <console type='pty'>
+	     <target type='sclp'/>
+	   </console>
 
-    <!-- Serial console for debugging -->
-    <console type='pty'>
-      <target type='sclp'/>
-    </console>
+	   <memballoon model='none'/>
 
-    <!-- Balloon driver for memory stats (required for libvirt memoryStats()) -->
-    <memballoon model='virtio'/>
+	   <rng model='virtio'>
+	     <backend model='random'>/dev/urandom</backend>
+	   </rng>
 
-    <!-- VirtIO RNG for entropy -->
-    <rng model='virtio'>
-      <backend model='random'>/dev/urandom</backend>
-    </rng>
-  </devices>
+	   <panic model='s390'/>
+	 </devices>
 </domain>`,
 		p.Name,
-		p.MemoryGB,
-		p.MemoryGB,
+		memKiB,
+		memKiB,
 		p.VCPUs,
 		p.KernelPath,
 		p.InitrdPath,
