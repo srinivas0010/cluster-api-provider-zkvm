@@ -249,7 +249,9 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		// rendezvous agent inside the initrd handles everything.
 		// The kernel cmdline only needs rd.neednet=1 for network bring-up
 		// and static IP args so the node can reach the rendezvous service.
-		cmdline := "rd.neednet=1 console=ttysclp0"
+		// CoreOS Live PXE direct kernel boot requires ignition.firstboot, ignition.platform.id=metal,
+		// and ai.ip_cfg_override=1 so NMState/Ignition applies static IP and starts agent-installer.service.
+		cmdline := "rd.neednet=1 ai.ip_cfg_override=1 console=ttysclp0 random.trust_cpu=on rd.luks.options=discard ignition.firstboot ignition.platform.id=metal"
 		if zkvmMachine.Spec.IPAddress != "" {
 			// Format static IP cmdline: ip=<client-ip>::<gw-ip>:<netmask>:<hostname>:<device>:none
 			// On s390x CCW virtio, leaving the device empty (::none) lets dracut auto-bind to the primary network device (enc1).
