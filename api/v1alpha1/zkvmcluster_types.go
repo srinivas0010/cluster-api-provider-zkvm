@@ -71,6 +71,13 @@ type ZKVMClusterSpec struct {
 	// +kubebuilder:validation:Required
 	InitrdPath string `json:"initrdPath"`
 
+	// RootFSURL is the HTTP URL from which nodes fetch the live rootfs image
+	// (agent.s390x-rootfs.img) during direct-kernel PXE boot.
+	// e.g. "http://192.168.152.2:8080/rootfs.img".
+	// Appended to the kernel cmdline as: coreos.live.rootfs_url=<RootFSURL>
+	// +optional
+	RootFSURL string `json:"rootFSURL,omitempty"`
+
 	// IgnitionBaseURL is the base URL from which nodes fetch their ignition
 	// configuration during first boot. Optional — ABI ignition is embedded
 	// in the initrd and does not require an external URL. This field is

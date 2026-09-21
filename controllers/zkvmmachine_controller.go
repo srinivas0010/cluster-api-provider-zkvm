@@ -264,6 +264,15 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 			}
 		}
 
+		// RHCOS Live PXE boot requires coreos.live.rootfs_url to fetch the rootfs image
+		// into RAM to mount /sysroot and switch root into CoreOS.
+		if zkvmCluster.Spec.RootFSURL != "" {
+			cmdline = fmt.Sprintf("%s coreos.live.rootfs_url=%s", cmdline, zkvmCluster.Spec.RootFSURL)
+		} else if zkvmCluster.Spec.IgnitionBaseURL != "" {
+			// Backward compatibility if rootfs is hosted under ignition base
+			cmdline = fmt.Sprintf("%s coreos.live.rootfs_url=%s/rootfs.img", cmdline, zkvmCluster.Spec.IgnitionBaseURL)
+		}
+
 		log.Info("Defining libvirt domain", "domain", domainName)
 		err = kvm.DefineDomain(zkvmlibvirt.DomainCreateParams{
 			Name:          domainName,
