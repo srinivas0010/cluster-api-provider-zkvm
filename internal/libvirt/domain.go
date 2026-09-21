@@ -103,8 +103,14 @@ func (c *Client) DefineDomain(p DomainCreateParams) error {
 	     <model type='virtio'/>
 	   </interface>
 
+	   <serial type='pty'>
+	     <target type='sclp-serial' port='0'>
+	       <model name='sclpconsole'/>
+	     </target>
+	   </serial>
+
 	   <console type='pty'>
-	     <target type='sclp'/>
+	     <target type='serial' port='0'/>
 	   </console>
 
 	   <memballoon model='none'/>

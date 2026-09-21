@@ -252,12 +252,13 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		cmdline := "rd.neednet=1 console=ttysclp0"
 		if zkvmMachine.Spec.IPAddress != "" {
 			// Format static IP cmdline: ip=<client-ip>::<gw-ip>:<netmask>:<hostname>:<device>:none
+			// On s390x CCW virtio, leaving the device empty (::none) lets dracut auto-bind to the primary network device (enc1).
 			gw := zkvmMachine.Spec.Gateway
 			mask := zkvmMachine.Spec.Netmask
 			if mask == "" {
 				mask = "255.255.255.0"
 			}
-			cmdline = fmt.Sprintf("%s ip=%s::%s:%s:%s:eth0:none", cmdline, zkvmMachine.Spec.IPAddress, gw, mask, domainName)
+			cmdline = fmt.Sprintf("%s ip=%s::%s:%s:%s::none", cmdline, zkvmMachine.Spec.IPAddress, gw, mask, domainName)
 			if zkvmMachine.Spec.Nameserver != "" {
 				cmdline = fmt.Sprintf("%s nameserver=%s", cmdline, zkvmMachine.Spec.Nameserver)
 			}
