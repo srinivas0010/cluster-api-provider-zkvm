@@ -30,6 +30,16 @@ type ZKVMClusterSpec struct {
 	// +kubebuilder:validation:Required
 	KVMHost string `json:"kvmHost"`
 
+	// BastionIP is the IP address of the dedicated bastion VM for this cluster.
+	// The bastion runs HAProxy (ports 6443, 22623, 443, 80), named (DNS), and
+	// HTTPD (port 8080 for rootfs serving). It is a KVM VM on the same network
+	// bridge as the target cluster nodes and is provisioned exclusively for
+	// this cluster — it is not shared with any other cluster.
+	// This field is informational — the installer configures the bastion before
+	// applying CAPI manifests. The controller does not connect to the bastion.
+	// +optional
+	BastionIP string `json:"bastionIP,omitempty"`
+
 	// SSHUser is the username used to SSH into the KVM host (e.g. "root").
 	// +optional
 	SSHUser string `json:"sshUser,omitempty"`
@@ -110,6 +120,7 @@ type ZKVMClusterStatus struct {
 // +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels['cluster\\.x-k8s\\.io/cluster-name']"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready"
 // +kubebuilder:printcolumn:name="KVMHost",type="string",JSONPath=".spec.kvmHost"
+// +kubebuilder:printcolumn:name="BastionIP",type="string",JSONPath=".spec.bastionIP"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ZKVMCluster is the schema for the zkvmclusters API.
