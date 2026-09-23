@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.kvmHost
       name: KVMHost
       type: string
+    - jsonPath: .spec.bastionIP
+      name: BastionIP
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -59,6 +62,16 @@ spec:
               ZKVMClusterSpec defines the desired state of ZKVMCluster.
               It describes the KVM host environment that will back a CAPI-managed cluster.
             properties:
+              bastionIP:
+                description: |-
+                  BastionIP is the IP address of the dedicated bastion VM for this cluster.
+                  The bastion runs HAProxy (ports 6443, 22623, 443, 80), named (DNS), and
+                  HTTPD (port 8080 for rootfs serving). It is a KVM VM on the same network
+                  bridge as the target cluster nodes and is provisioned exclusively for
+                  this cluster — it is not shared with any other cluster.
+                  This field is informational — the installer configures the bastion before
+                  applying CAPI manifests. The controller does not connect to the bastion.
+                type: string
               controlPlaneEndpoint:
                 description: |-
                   ControlPlaneEndpoint is the IP and port of the Kubernetes API server
