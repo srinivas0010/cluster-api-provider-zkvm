@@ -156,6 +156,16 @@ spec:
                   (qcow2) will be created. Must already exist on the KVM host.
                   Verify with: virsh pool-list --all
                 type: string
+              workerIPPool:
+                description: |-
+                  WorkerIPPool is an ordered list of IPv4 addresses available for dynamic
+                  assignment to worker ZKVMMachines created from a ZKVMMachineTemplate via
+                  MachineDeployment. The reconciler claims the first unclaimed IP from this
+                  list for each new worker machine. Add extra IPs beyond the initial replica
+                  count to allow scale-up without reinstalling.
+                items:
+                  type: string
+                type: array
             required:
             - controlPlaneEndpoint
             - initrdPath

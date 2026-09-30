@@ -94,6 +94,23 @@ type ZKVMClusterSpec struct {
 	// preserved for future use cases that may serve per-node ignition files.
 	// +optional
 	IgnitionBaseURL string `json:"ignitionBaseURL,omitempty"`
+
+	// WorkerIPPool is an ordered list of IPv4 addresses available for dynamic
+	// assignment to worker ZKVMMachines that have no pre-set ipAddress
+	// (i.e. machines created from a ZKVMMachineTemplate via MachineDeployment).
+	//
+	// The reconciler scans all ZKVMMachines in the cluster namespace, collects
+	// IPs already in use, and claims the first unclaimed IP from this list for
+	// each new worker machine. Add extra IPs beyond the initial replica count
+	// to allow scale-up without reinstalling.
+	//
+	// Example: ip_start=192.168.153.20, ip_count=6 → pool is
+	//   ["192.168.153.20","192.168.153.21","192.168.153.22",
+	//    "192.168.153.23","192.168.153.24","192.168.153.25"]
+	//
+	// Not used for control-plane nodes — they always have a fixed ipAddress.
+	// +optional
+	WorkerIPPool []string `json:"workerIPPool,omitempty"`
 }
 
 // ZKVMClusterStatus defines the observed state of ZKVMCluster.

@@ -155,6 +155,37 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		return ctrl.Result{}, nil
 	}
 
+	// ── Step 0: Dynamic IP allocation (MachineDeployment / MachineSet path) ──
+	// When a ZKVMMachine is created from a ZKVMMachineTemplate via MachineSet,
+	// spec.ipAddress is empty — the template has no fixed IP. We claim the
+	// first unclaimed IP from ZKVMCluster.Spec.WorkerIPPool.
+	//
+	// Algorithm (single-writer safe — CAPI controller runs as one replica):
+	//   1. List all ZKVMMachines in this namespace that belong to this cluster.
+	//   2. Build the set of IPs already claimed (non-empty spec.ipAddress).
+	//   3. Walk WorkerIPPool in order — return the first IP not in the set.
+	//   4. Patch spec.ipAddress on this ZKVMMachine immediately so the next
+	//      reconcile of a sibling machine sees this IP as taken.
+	if zkvmMachine.Spec.IPAddress == "" {
+		ip, err := r.claimWorkerIP(ctx, log, zkvmMachine, zkvmCluster)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: claimWorkerIP: %w", err)
+		}
+		if ip == "" {
+			log.Info("No IP available in WorkerIPPool — requeuing (add more IPs to the pool)",
+				"pool", zkvmCluster.Spec.WorkerIPPool)
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+		// Persist the claimed IP into spec before domain creation.
+		// The patchHelper at the top of Reconcile() will write this back.
+		zkvmMachine.Spec.IPAddress = ip
+		// Inherit network settings from cluster spec defaults.
+		if zkvmMachine.Spec.Nameserver == "" {
+			zkvmMachine.Spec.Nameserver = zkvmCluster.Spec.BastionIP
+		}
+		log.Info("Claimed worker IP from pool", "ip", ip, "machine", zkvmMachine.Name)
+	}
+
 	log.Info("Reconciling ZKVMMachine — creating VM",
 		"machine", zkvmMachine.Name,
 		"kvmHost", zkvmCluster.Spec.KVMHost,
@@ -441,6 +472,51 @@ func (r *ZKVMMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		Complete(r)
+}
+
+// claimWorkerIP scans all ZKVMMachines in the cluster namespace, builds the
+// set of already-claimed IPs, and returns the first IP from WorkerIPPool that
+// is not yet taken. Returns ("", nil) if the pool is exhausted — caller
+// should requeue.
+func (r *ZKVMMachineReconciler) claimWorkerIP(
+	ctx context.Context,
+	log logr.Logger,
+	zkvmMachine *infrav1.ZKVMMachine,
+	zkvmCluster *infrav1.ZKVMCluster,
+) (string, error) {
+	if len(zkvmCluster.Spec.WorkerIPPool) == 0 {
+		return "", fmt.Errorf("ZKVMCluster %q has an empty WorkerIPPool — "+
+			"add ip_start + ip_count to compute_node_groups in inputs-zkvm.yaml",
+			zkvmCluster.Name)
+	}
+
+	// List all ZKVMMachines in this namespace.
+	var machineList infrav1.ZKVMMachineList
+	if err := r.List(ctx, &machineList, client.InNamespace(zkvmMachine.Namespace)); err != nil {
+		return "", fmt.Errorf("claimWorkerIP: list ZKVMMachines: %w", err)
+	}
+
+	// Build set of IPs already taken by other machines.
+	taken := make(map[string]bool, len(machineList.Items))
+	for _, m := range machineList.Items {
+		if m.Name != zkvmMachine.Name && m.Spec.IPAddress != "" {
+			taken[m.Spec.IPAddress] = true
+		}
+	}
+
+	// Return first unclaimed IP from the pool.
+	for _, ip := range zkvmCluster.Spec.WorkerIPPool {
+		if !taken[ip] {
+			log.Info("claimWorkerIP: selected IP from pool", "ip", ip,
+				"takenCount", len(taken), "poolSize", len(zkvmCluster.Spec.WorkerIPPool))
+			return ip, nil
+		}
+	}
+
+	// Pool exhausted.
+	log.Info("claimWorkerIP: pool exhausted",
+		"poolSize", len(zkvmCluster.Spec.WorkerIPPool), "takenCount", len(taken))
+	return "", nil
 }
 
 // deriveMACAddress generates a deterministic MAC address from a domain name.
