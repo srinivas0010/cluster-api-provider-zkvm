@@ -271,9 +271,15 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	}
 
 	if !domExists {
-		// MAC address: derive from machine name deterministically.
-		// Format: 52:54:00:XX:XX:XX — using last 3 bytes of a hash.
-		mac := deriveMACAddress(domainName)
+		// MAC address: derive from the VM's static IP address deterministically.
+		// Using the IP (not the domain name) ensures the installer and controller
+		// always hash the same value: the installer knows pool IPs at manifest
+		// generation time; the controller knows the IP after claimWorkerIP().
+		// For control nodes the IP is set in spec at manifest time.
+		// This is the only value both sides can independently agree on —
+		// the CAPI-generated domain name contains random MachineSet hash suffixes
+		// that cannot be predicted at install time.
+		mac := deriveMACAddress(zkvmMachine.Spec.IPAddress)
 
 		// ABI ignition is embedded inside the initrd (agent.s390x-initrd.img).
 		// Nodes do not need to fetch ignition from an external URL — the
