@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// +kubebuilder:object:generate=true
 // ZKVMMachineTemplateResource defines a single ZKVMMachineTemplate entry.
 // It wraps the ZKVMMachineSpec so KubeadmControlPlane and MachineDeployment
 // can reference a reusable VM blueprint.
@@ -29,6 +30,7 @@ type ZKVMMachineTemplateResource struct {
 	Spec ZKVMMachineSpec `json:"spec"`
 }
 
+// +kubebuilder:object:generate=true
 // ZKVMMachineTemplateSpec defines the desired state of ZKVMMachineTemplate.
 type ZKVMMachineTemplateSpec struct {
 	// Template is the ZKVMMachineSpec blueprint.
