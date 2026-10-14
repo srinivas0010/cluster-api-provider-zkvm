@@ -298,23 +298,44 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		var cmdline, kernelPath, initrdPath string
 
 		if isDay2 {
-			// ── Day-2 RHCOS live PXE cmdline ─────────────────────────────────
-			// coreos-installer writes RHCOS to disk and reboots. The installed
-			// system then contacts the MCS to get its full config.
+			// ── Day-2 coreos-installer cmdline ────────────────────────────────
+			// Uses the same ABI kernel/initrd/rootfs that installed the cluster.
+			// The ABI rootfs (served by the bastion HTTPD) contains the
+			// OCP-specific RHCOS ostree with CRI-O, kubelet, and MCD already
+			// baked in — the generic RHCOS live PXE files from coreos-bootimages
+			// do NOT contain these and must not be used for day-2.
+			//
+			// The only day-2-specific file is worker.ign, which the controller
+			// writes to the KVM host web directory before starting the VM.
+			// coreos-installer fetches it via coreos.inst.ignition_url and
+			// writes it to disk; the installed node then contacts the MCS
+			// directly using the embedded MCS URL and CA cert.
+			//
 			// The ip= argument is carried over by coreos-installer into the
 			// installed OS as a NetworkManager keyfile — no extra network step needed.
 			d2 := zkvmCluster.Spec.Day2Boot
 			ignURL := d2.HTTPBaseURL + "/worker.ign"
+			// rootfs: use the ABI rootfs already served by the bastion HTTPD.
+			// Fall back to Day2Boot.RootFSURL only if the cluster-level field is unset.
+			rootfsURL := zkvmCluster.Spec.RootFSURL
+			if rootfsURL == "" {
+				rootfsURL = d2.RootFSURL
+			}
 			cmdline = fmt.Sprintf(
 				"rd.neednet=1 console=ttysclp0 random.trust_cpu=on coreos.inst.install_dev=/dev/vda"+
 					" ip=%s::%s:%s:%s::none nameserver=%s"+
 					" coreos.live.rootfs_url=%s coreos.inst.ignition_url=%s",
 				zkvmMachine.Spec.IPAddress, gw, mask, domainName, zkvmMachine.Spec.Nameserver,
-				d2.RootFSURL, ignURL,
+				rootfsURL, ignURL,
 			)
-			kernelPath = d2.KernelPath
-			initrdPath = d2.InitrdPath
-			log.Info("Using day-2 RHCOS live PXE cmdline", "domain", domainName, "ignURL", ignURL)
+			// kernel + initrd: use the ABI artifacts already staged on the KVM host.
+			// These contain the OCP-specific RHCOS image; the generic RHCOS live
+			// kernel/initrd from coreos-bootimages must not be used.
+			kernelPath = zkvmCluster.Spec.KernelPath
+			initrdPath = zkvmCluster.Spec.InitrdPath
+			log.Info("Using day-2 coreos-installer cmdline (ABI kernel/initrd/rootfs)",
+				"domain", domainName, "ignURL", ignURL, "rootfsURL", rootfsURL,
+				"kernelPath", kernelPath, "initrdPath", initrdPath)
 		} else {
 			// ── ABI cmdline (control plane + initial workers) ─────────────────
 			cmdline = "rd.neednet=1 ai.ip_cfg_override=1 console=ttysclp0 random.trust_cpu=on rd.luks.options=discard ignition.firstboot ignition.platform.id=metal"
