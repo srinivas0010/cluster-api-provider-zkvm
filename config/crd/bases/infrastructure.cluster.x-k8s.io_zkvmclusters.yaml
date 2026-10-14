@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.22.0
+    controller-gen.kubebuilder.io/version: v0.14.0
   name: zkvmclusters.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -88,22 +88,55 @@ spec:
                 - host
                 - port
                 type: object
-              rootFSURL:
+              day2Boot:
                 description: |-
-                  RootFSURL is the HTTP URL from which nodes fetch the live rootfs image
-                  (agent.s390x-rootfs.img) during direct-kernel PXE boot.
-                  e.g. "http://192.168.152.2:8080/rootfs.img".
-                  Appended to the kernel cmdline as: coreos.live.rootfs_url=<RootFSURL>
-                type: string
+                  Day2Boot holds configuration for day-2 worker node replacement via RHCOS
+                  live PXE boot. When set, the controller uses this block instead of the
+                  ABI kernel/initrd for Machines that carry the deployment-name label
+                  (i.e. workers created by a MachineDeployment).
+                  Populated by the installer after install-complete via a patch call.
+                properties:
+                  httpBaseURL:
+                    description: |-
+                      HTTPBaseURL is the base URL of the HTTP server on the KVM host bridge.
+                      The controller derives the ignition URL as HTTPBaseURL + "/worker.ign".
+                      e.g. "http://192.168.153.1:9100"
+                    type: string
+                  initrdPath:
+                    description: |-
+                      InitrdPath is the absolute path on the KVM host to the RHCOS live initramfs.
+                      e.g. "/var/lib/libvirt/boot/rhcos-9.8.20260428-0-live-initramfs.s390x.img"
+                    type: string
+                  kernelPath:
+                    description: |-
+                      KernelPath is the absolute path on the KVM host to the RHCOS live kernel.
+                      Must be readable by the QEMU process (not under /root).
+                      e.g. "/var/lib/libvirt/boot/rhcos-9.8.20260428-0-live-kernel.s390x"
+                    type: string
+                  rootFSURL:
+                    description: |-
+                      RootFSURL is the HTTP URL from which the VM fetches the live rootfs.
+                      e.g. "http://192.168.153.1:9100/rhcos-9.8.20260428-0-live-rootfs.s390x.img"
+                    type: string
+                  webRoot:
+                    description: |-
+                      WebRoot is the absolute directory path on the KVM host that the HTTP
+                      service serves. The controller writes worker.ign here before each new VM.
+                      e.g. "/var/lib/libvirt/day2"
+                    type: string
+                required:
+                - httpBaseURL
+                - initrdPath
+                - kernelPath
+                - rootFSURL
+                - webRoot
+                type: object
               ignitionBaseURL:
                 description: |-
                   IgnitionBaseURL is the base URL from which nodes fetch their ignition
-                  configuration during first boot.  The controller appends "/<domainName>.ign"
-                  to form the per-node kernel cmdline argument:
-                    ignition.config.url=<IgnitionBaseURL>/<domainName>.ign
-
-                  Set this to the bastion HTTPD address, e.g. "http://192.168.152.2:8080/ignition".
-                  The bastion HTTPD must serve the per-node ignition files at that path.
+                  configuration during first boot. Optional — ABI ignition is embedded
+                  in the initrd and does not require an external URL. This field is
+                  preserved for future use cases that may serve per-node ignition files.
                 type: string
               initrdPath:
                 description: |-
@@ -130,6 +163,13 @@ spec:
                   that VM virtual NICs will be attached to.
                   Must be a bridge connected to the physical network (not virbr0/NAT).
                   Verify with: ip link show <bridge>
+                type: string
+              rootFSURL:
+                description: |-
+                  RootFSURL is the HTTP URL from which nodes fetch the live rootfs image
+                  (agent.s390x-rootfs.img) during direct-kernel PXE boot.
+                  e.g. "http://192.168.152.2:8080/rootfs.img".
+                  Appended to the kernel cmdline as: coreos.live.rootfs_url=<RootFSURL>
                 type: string
               sshKeySecretRef:
                 description: |-
@@ -159,10 +199,22 @@ spec:
               workerIPPool:
                 description: |-
                   WorkerIPPool is an ordered list of IPv4 addresses available for dynamic
-                  assignment to worker ZKVMMachines created from a ZKVMMachineTemplate via
-                  MachineDeployment. The reconciler claims the first unclaimed IP from this
-                  list for each new worker machine. Add extra IPs beyond the initial replica
-                  count to allow scale-up without reinstalling.
+                  assignment to worker ZKVMMachines that have no pre-set ipAddress
+                  (i.e. machines created from a ZKVMMachineTemplate via MachineDeployment).
+
+
+                  The reconciler scans all ZKVMMachines in the cluster namespace, collects
+                  IPs already in use, and claims the first unclaimed IP from this list for
+                  each new worker machine. Add extra IPs beyond the initial replica count
+                  to allow scale-up without reinstalling.
+
+
+                  Example: ip_start=192.168.153.20, ip_count=6 → pool is
+                    ["192.168.153.20","192.168.153.21","192.168.153.22",
+                     "192.168.153.23","192.168.153.24","192.168.153.25"]
+
+
+                  Not used for control-plane nodes — they always have a fixed ipAddress.
                 items:
                   type: string
                 type: array

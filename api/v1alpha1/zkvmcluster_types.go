@@ -22,6 +22,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
+// +kubebuilder:object:generate=true
 // ZKVMClusterSpec defines the desired state of ZKVMCluster.
 // It describes the KVM host environment that will back a CAPI-managed cluster.
 type ZKVMClusterSpec struct {
@@ -121,6 +122,7 @@ type ZKVMClusterSpec struct {
 	WorkerIPPool []string `json:"workerIPPool,omitempty"`
 }
 
+// +kubebuilder:object:generate=true
 // Day2BootConfig holds the RHCOS live PXE settings used for day-2 worker
 // replacement. All fields are absolute paths or HTTP URLs on the KVM host.
 type Day2BootConfig struct {
@@ -148,6 +150,7 @@ type Day2BootConfig struct {
 	WebRoot string `json:"webRoot"`
 }
 
+// +kubebuilder:object:generate=true
 // ZKVMClusterStatus defines the observed state of ZKVMCluster.
 type ZKVMClusterStatus struct {
 	// Ready indicates whether the KVM host is reachable and the storage pool

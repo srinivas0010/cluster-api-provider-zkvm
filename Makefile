@@ -15,7 +15,7 @@
 IMG ?= quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm:v0.1.0
 
 # controller-gen version to use for CRD/deepcopy generation.
-CONTROLLER_GEN_VERSION ?= v0.14.0
+CONTROLLER_GEN_VERSION ?= v0.17.3
 
 # Directories.
 LOCALBIN    ?= $(shell pwd)/bin

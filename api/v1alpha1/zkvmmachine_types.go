@@ -21,6 +21,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
+// +kubebuilder:object:generate=true
 // ZKVMMachineSpec defines the desired state of ZKVMMachine.
 // Each ZKVMMachine corresponds to exactly one KVM virtual machine on the KVM host.
 // ZKVMMachine objects are created automatically by KubeadmControlPlane or
@@ -67,6 +68,7 @@ type ZKVMMachineSpec struct {
 	ProviderID *string `json:"providerID,omitempty"`
 }
 
+// +kubebuilder:object:generate=true
 // ZKVMMachineStatus defines the observed state of ZKVMMachine.
 type ZKVMMachineStatus struct {
 	// Ready indicates whether the VM has been created and has joined the cluster.
