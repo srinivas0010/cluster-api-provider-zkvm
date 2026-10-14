@@ -299,11 +299,26 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 
 		if isDay2 {
 			// ── Day-2 coreos-installer cmdline ────────────────────────────────
-			// Uses the same ABI kernel/initrd/rootfs that installed the cluster.
-			// The ABI rootfs (served by the bastion HTTPD) contains the
-			// OCP-specific RHCOS ostree with CRI-O, kubelet, and MCD already
-			// baked in — the generic RHCOS live PXE files from coreos-bootimages
-			// do NOT contain these and must not be used for day-2.
+			// Uses the generic RHCOS live PXE kernel/initrd (from Day2Boot) as
+			// the installer environment, and the OCP-specific rootfs served by
+			// the bastion HTTPD as the image written to disk.
+			//
+			// Why generic RHCOS live kernel/initrd (not ABI):
+			//   The ABI kernel/initrd is the OpenShift agent-based installer.
+			//   After writing to disk it issues a guest poweroff, not a reboot.
+			//   On s390x/CCW a poweroff halts the CPU but libvirt still reports
+			//   the domain as running — the installed OS never gets to boot.
+			//   The generic RHCOS live coreos-installer issues a guest reboot
+			//   instead. On s390x, guest-triggered reboots ignore the libvirt
+			//   XML kernel/initrd and boot from the disk grub directly — proven
+			//   by manual testing (manual-worker-22 reached Ready in ~82s).
+			//
+			// Why OCP rootfs from bastion (not Day2Boot.RootFSURL):
+			//   coreos.live.rootfs_url is what actually gets written to disk and
+			//   runs forever. It must be the OCP-specific RHCOS image (with
+			//   CRI-O, kubelet, MCD). The bastion serves this at RootFSURL.
+			//   Day2Boot.RootFSURL is the generic RHCOS rootfs — used only as a
+			//   fallback if the cluster-level field is unset.
 			//
 			// The only day-2-specific file is worker.ign, which the controller
 			// writes to the KVM host web directory before starting the VM.
@@ -315,7 +330,8 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 			// installed OS as a NetworkManager keyfile — no extra network step needed.
 			d2 := zkvmCluster.Spec.Day2Boot
 			ignURL := d2.HTTPBaseURL + "/worker.ign"
-			// rootfs: use the ABI rootfs already served by the bastion HTTPD.
+			// rootfs: use the OCP-specific rootfs served by the bastion HTTPD.
+			// This is what gets written to disk and must contain CRI-O/kubelet/MCD.
 			// Fall back to Day2Boot.RootFSURL only if the cluster-level field is unset.
 			rootfsURL := zkvmCluster.Spec.RootFSURL
 			if rootfsURL == "" {
@@ -328,12 +344,13 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 				zkvmMachine.Spec.IPAddress, gw, mask, domainName, zkvmMachine.Spec.Nameserver,
 				rootfsURL, ignURL,
 			)
-			// kernel + initrd: use the ABI artifacts already staged on the KVM host.
-			// These contain the OCP-specific RHCOS image; the generic RHCOS live
-			// kernel/initrd from coreos-bootimages must not be used.
-			kernelPath = zkvmCluster.Spec.KernelPath
-			initrdPath = zkvmCluster.Spec.InitrdPath
-			log.Info("Using day-2 coreos-installer cmdline (ABI kernel/initrd/rootfs)",
+			// kernel + initrd: use the generic RHCOS live PXE files staged by
+			// the installer (Day2Boot.KernelPath/InitrdPath). These provide the
+			// coreos-installer live environment which reboots the guest on
+			// completion — allowing the installed disk grub to take over.
+			kernelPath = d2.KernelPath
+			initrdPath = d2.InitrdPath
+			log.Info("Using day-2 coreos-installer cmdline (generic RHCOS live kernel, OCP rootfs)",
 				"domain", domainName, "ignURL", ignURL, "rootfsURL", rootfsURL,
 				"kernelPath", kernelPath, "initrdPath", initrdPath)
 		} else {
