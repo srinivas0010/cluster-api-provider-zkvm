@@ -150,48 +150,55 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	machine *clusterv1.Machine,
 ) (ctrl.Result, error) {
 
-	// Already done — idempotent check.
+	// ── Already fully reconciled ─────────────────────────────────────────────
+	// Status.Ready is set only after the VM is running AND (for day-2 workers)
+	// CSRs are approved and providerID is patched on the OCP Node.
+	// ABI control-plane and initial workers set Ready immediately after VM start
+	// (see bottom of this function); day-2 workers requeue until the Node is Ready.
 	if zkvmMachine.Status.Ready {
 		return ctrl.Result{}, nil
 	}
 
 	// ── Step 0: Dynamic IP allocation (MachineDeployment / MachineSet path) ──
-	// When a ZKVMMachine is created from a ZKVMMachineTemplate via MachineSet,
-	// spec.ipAddress is empty — the template has no fixed IP. We claim the
-	// first unclaimed IP from ZKVMCluster.Spec.WorkerIPPool.
-	//
-	// Algorithm (single-writer safe — CAPI controller runs as one replica):
-	//   1. List all ZKVMMachines in this namespace that belong to this cluster.
-	//   2. Build the set of IPs already claimed (non-empty spec.ipAddress).
-	//   3. Walk WorkerIPPool in order — return the first IP not in the set.
-	//   4. Patch spec.ipAddress on this ZKVMMachine immediately so the next
-	//      reconcile of a sibling machine sees this IP as taken.
 	if zkvmMachine.Spec.IPAddress == "" {
 		ip, err := r.claimWorkerIP(ctx, log, zkvmMachine, zkvmCluster)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: claimWorkerIP: %w", err)
 		}
 		if ip == "" {
-			log.Info("No IP available in WorkerIPPool — requeuing (add more IPs to the pool)",
+			log.Info("No IP available in WorkerIPPool — requeuing",
 				"pool", zkvmCluster.Spec.WorkerIPPool)
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 		}
-		// Persist the claimed IP into spec before domain creation.
-		// The patchHelper at the top of Reconcile() will write this back.
 		zkvmMachine.Spec.IPAddress = ip
-		// Inherit network settings from cluster spec defaults.
+		// Inherit network settings from cluster-level defaults when the
+		// ZKVMMachineTemplate did not set them (e.g. old templates without gateway).
 		if zkvmMachine.Spec.Nameserver == "" {
 			zkvmMachine.Spec.Nameserver = zkvmCluster.Spec.BastionIP
+		}
+		// Gateway fallback: use BastionIP as a best-effort default.
+		// The correct value (KVM host bridge IP) is stamped into the template
+		// by the installer since the new gateway field was added.
+		if zkvmMachine.Spec.Gateway == "" {
+			zkvmMachine.Spec.Gateway = zkvmCluster.Spec.BastionIP
 		}
 		log.Info("Claimed worker IP from pool", "ip", ip, "machine", zkvmMachine.Name)
 	}
 
+	// ── Determine whether this is a day-2 worker ─────────────────────────────
+	// A machine uses the day-2 RHCOS live PXE path when BOTH:
+	//   1. ZKVMCluster.Spec.Day2Boot is set (installer patches this after install-complete).
+	//   2. The CAPI Machine carries the deployment-name label (workers only; never control plane).
+	_, hasDeploymentLabel := machine.Labels["cluster.x-k8s.io/deployment-name"]
+	isDay2 := zkvmCluster.Spec.Day2Boot != nil && hasDeploymentLabel
+
 	log.Info("Reconciling ZKVMMachine — creating VM",
 		"machine", zkvmMachine.Name,
 		"kvmHost", zkvmCluster.Spec.KVMHost,
+		"day2", isDay2,
 	)
 
-	// Read SSH key if referenced
+	// ── Read SSH key ──────────────────────────────────────────────────────────
 	var keyPath string
 	if zkvmCluster.Spec.SSHKeySecretRef != nil {
 		secretKey := client.ObjectKey{
@@ -221,7 +228,16 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		defer os.Remove(keyPath)
 	}
 
-	// Open libvirt connection with auth options
+	// ── Day-2: write fresh worker.ign to KVM host before defining the domain ──
+	// For day-2 workers: fetch worker-user-data-managed from the target cluster
+	// and write it to the web-served directory so the VM can fetch it during boot.
+	if isDay2 {
+		if err := r.writeWorkerIgnition(ctx, log, zkvmCluster, keyPath); err != nil {
+			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: writeWorkerIgnition: %w", err)
+		}
+	}
+
+	// ── Open libvirt connection ───────────────────────────────────────────────
 	kvm, err := zkvmlibvirt.NewClientWithAuth(zkvmlibvirt.ClientOptions{
 		KVMHost: zkvmCluster.Spec.KVMHost,
 		SSHUser: zkvmCluster.Spec.SSHUser,
@@ -240,7 +256,6 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: VolumeExists: %w", err)
 	}
-
 	var diskPath string
 	if !volExists {
 		log.Info("Creating disk volume", "volume", volName, "sizeGB", zkvmMachine.Spec.DiskGB)
@@ -255,9 +270,6 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		log.Info("Disk volume created", "path", diskPath)
 	} else {
 		log.Info("Disk volume already exists — fetching path", "volume", volName)
-		// Bug 1: Use GetVolumePath() instead of reconstructing the path
-		// from a hardcoded convention. The pool may not live under
-		// /var/lib/libvirt/images/ on all deployments.
 		diskPath, err = kvm.GetVolumePath(zkvmCluster.Spec.StoragePool, volName)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: GetVolumePath: %w", err)
@@ -271,62 +283,64 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	}
 
 	if !domExists {
-		// MAC address: derive from the VM's static IP address deterministically.
-		// Using the IP (not the domain name) ensures the installer and controller
-		// always hash the same value: the installer knows pool IPs at manifest
-		// generation time; the controller knows the IP after claimWorkerIP().
-		// For control nodes the IP is set in spec at manifest time.
-		// This is the only value both sides can independently agree on —
-		// the CAPI-generated domain name contains random MachineSet hash suffixes
-		// that cannot be predicted at install time.
 		mac := deriveMACAddress(zkvmMachine.Spec.IPAddress)
 
-		// ABI ignition is embedded inside the initrd (agent.s390x-initrd.img).
-		// Nodes do not need to fetch ignition from an external URL — the
-		// rendezvous agent inside the initrd handles everything.
-		// The kernel cmdline only needs rd.neednet=1 for network bring-up
-		// and static IP args so the node can reach the rendezvous service.
-		// CoreOS Live PXE direct kernel boot requires ignition.firstboot, ignition.platform.id=metal,
-		// and ai.ip_cfg_override=1 so NMState/Ignition applies static IP and starts agent-installer.service.
-		cmdline := "rd.neednet=1 ai.ip_cfg_override=1 console=ttysclp0 random.trust_cpu=on rd.luks.options=discard ignition.firstboot ignition.platform.id=metal"
-		if zkvmMachine.Spec.IPAddress != "" {
-			// Format static IP cmdline: ip=<client-ip>::<gw-ip>:<netmask>:<hostname>:<device>:none
-			// On s390x CCW virtio, leaving the device empty (::none) lets dracut auto-bind to the primary network device (enc1).
-			gw := zkvmMachine.Spec.Gateway
-			mask := zkvmMachine.Spec.Netmask
-			if mask == "" {
-				mask = "255.255.255.0"
-			}
-			cmdline = fmt.Sprintf("%s ip=%s::%s:%s:%s::none", cmdline, zkvmMachine.Spec.IPAddress, gw, mask, domainName)
-			if zkvmMachine.Spec.Nameserver != "" {
-				cmdline = fmt.Sprintf("%s nameserver=%s", cmdline, zkvmMachine.Spec.Nameserver)
-			}
+		gw := zkvmMachine.Spec.Gateway
+		mask := zkvmMachine.Spec.Netmask
+		if mask == "" {
+			mask = "255.255.255.0"
 		}
 
-		// RHCOS Live PXE boot requires coreos.live.rootfs_url to fetch the rootfs image
-		// into RAM to mount /sysroot and switch root into CoreOS.
-		if zkvmCluster.Spec.RootFSURL != "" {
-			cmdline = fmt.Sprintf("%s coreos.live.rootfs_url=%s", cmdline, zkvmCluster.Spec.RootFSURL)
-		} else if zkvmCluster.Spec.IgnitionBaseURL != "" {
-			// Backward compatibility if rootfs is hosted under ignition base
-			cmdline = fmt.Sprintf("%s coreos.live.rootfs_url=%s/rootfs.img", cmdline, zkvmCluster.Spec.IgnitionBaseURL)
+		var cmdline, kernelPath, initrdPath string
+
+		if isDay2 {
+			// ── Day-2 RHCOS live PXE cmdline ─────────────────────────────────
+			// coreos-installer writes RHCOS to disk and reboots. The installed
+			// system then contacts the MCS to get its full config.
+			// The ip= argument is carried over by coreos-installer into the
+			// installed OS as a NetworkManager keyfile — no extra network step needed.
+			d2 := zkvmCluster.Spec.Day2Boot
+			ignURL := d2.HTTPBaseURL + "/worker.ign"
+			cmdline = fmt.Sprintf(
+				"rd.neednet=1 console=ttysclp0 random.trust_cpu=on coreos.inst.install_dev=/dev/vda"+
+					" ip=%s::%s:%s:%s::none nameserver=%s"+
+					" coreos.live.rootfs_url=%s coreos.inst.ignition_url=%s",
+				zkvmMachine.Spec.IPAddress, gw, mask, domainName, zkvmMachine.Spec.Nameserver,
+				d2.RootFSURL, ignURL,
+			)
+			kernelPath = d2.KernelPath
+			initrdPath = d2.InitrdPath
+			log.Info("Using day-2 RHCOS live PXE cmdline", "domain", domainName, "ignURL", ignURL)
+		} else {
+			// ── ABI cmdline (control plane + initial workers) ─────────────────
+			cmdline = "rd.neednet=1 ai.ip_cfg_override=1 console=ttysclp0 random.trust_cpu=on rd.luks.options=discard ignition.firstboot ignition.platform.id=metal"
+			if zkvmMachine.Spec.IPAddress != "" {
+				cmdline = fmt.Sprintf("%s ip=%s::%s:%s:%s::none", cmdline, zkvmMachine.Spec.IPAddress, gw, mask, domainName)
+				if zkvmMachine.Spec.Nameserver != "" {
+					cmdline = fmt.Sprintf("%s nameserver=%s", cmdline, zkvmMachine.Spec.Nameserver)
+				}
+			}
+			if zkvmCluster.Spec.RootFSURL != "" {
+				cmdline = fmt.Sprintf("%s coreos.live.rootfs_url=%s", cmdline, zkvmCluster.Spec.RootFSURL)
+			} else if zkvmCluster.Spec.IgnitionBaseURL != "" {
+				cmdline = fmt.Sprintf("%s coreos.live.rootfs_url=%s/rootfs.img", cmdline, zkvmCluster.Spec.IgnitionBaseURL)
+			}
+			kernelPath = zkvmCluster.Spec.KernelPath
+			initrdPath = zkvmCluster.Spec.InitrdPath
 		}
 
 		log.Info("Defining libvirt domain", "domain", domainName)
-		err = kvm.DefineDomain(zkvmlibvirt.DomainCreateParams{
+		if err := kvm.DefineDomain(zkvmlibvirt.DomainCreateParams{
 			Name:          domainName,
 			VCPUs:         zkvmMachine.Spec.VCPUs,
 			MemoryGB:      zkvmMachine.Spec.MemoryGB,
 			DiskPath:      diskPath,
 			NetworkBridge: zkvmCluster.Spec.NetworkBridge,
 			MACAddress:    mac,
-			// Bug 7: Read KernelPath/InitrdPath from ZKVMClusterSpec
-			// instead of hardcoding a convention that may not hold.
-			KernelPath:    zkvmCluster.Spec.KernelPath,
-			InitrdPath:    zkvmCluster.Spec.InitrdPath,
+			KernelPath:    kernelPath,
+			InitrdPath:    initrdPath,
 			KernelCmdline: cmdline,
-		})
-		if err != nil {
+		}); err != nil {
 			return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: DefineDomain: %w", err)
 		}
 		log.Info("Libvirt domain defined", "domain", domainName)
@@ -335,9 +349,6 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 	}
 
 	// ── Step 3: Start the VM (idempotent) ────────────────────────────────────
-	// Bug 3: Check domain state before calling Create() so we don't error on
-	// an already-running VM. DOMAIN_RUNNING means it is up; any other state
-	// (DOMAIN_SHUTOFF, DOMAIN_PAUSED, …) is safe to start.
 	isRunning, err := kvm.IsDomainRunning(domainName)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("ZKVMMachineReconciler: IsDomainRunning: %w", err)
@@ -351,30 +362,29 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		log.Info("VM already running — skipping start", "domain", domainName)
 	}
 
-	// ── Step 4: Set ProviderID and mark Ready ────────────────────────────────
-	// With ABI bootstrap (no kubeadm), Machine.Status.NodeRef is never
-	// populated by CAPI bootstrap — OCP's own node lifecycle controller
-	// manages node registration independently. We mark ZKVMMachine Ready
-	// as soon as the libvirt domain is confirmed running. This unblocks the
-	// CAPI Cluster status reconciliation so it reports infrastructure ready.
+	// ── Step 4: Set ProviderID on ZKVMMachine ────────────────────────────────
 	providerID := fmt.Sprintf("zkvm://%s/%s", zkvmCluster.Spec.KVMHost, domainName)
 	zkvmMachine.Spec.ProviderID = &providerID
-
-	// Populate Status.Addresses from the domain's static IP (from spec).
-	// We use the spec IP directly since it is statically assigned — no need
-	// to query libvirt DHCP leases. This is always available immediately.
 	if zkvmMachine.Spec.IPAddress != "" {
 		zkvmMachine.Status.Addresses = []clusterv1.MachineAddress{
-			{
-				Type:    clusterv1.MachineInternalIP,
-				Address: zkvmMachine.Spec.IPAddress,
-			},
+			{Type: clusterv1.MachineInternalIP, Address: zkvmMachine.Spec.IPAddress},
 		}
 	}
 
-	zkvmMachine.Status.Ready = true
-	log.Info("ZKVMMachine ready — VM is running", "domain", domainName, "providerID", providerID)
-	return ctrl.Result{}, nil
+	// ── Step 5: ABI path — mark Ready immediately ────────────────────────────
+	// For ABI (control plane + initial workers) there is no kubeconfig Secret
+	// yet and CSR approval is not automated. Mark Ready as soon as the VM runs.
+	if !isDay2 {
+		zkvmMachine.Status.Ready = true
+		log.Info("ZKVMMachine ready (ABI path) — VM is running", "domain", domainName, "providerID", providerID)
+		return ctrl.Result{}, nil
+	}
+
+	// ── Step 6: Day-2 path — wait for Node, approve CSRs, patch providerID ───
+	// The VM is running but RHCOS is still installing. Requeue every 15 s until
+	// the OCP Node appears, both CSR rounds are approved, and providerID is set.
+	log.Info("Day-2 VM running — polling for Node and CSRs", "domain", domainName)
+	return r.reconcileDay2PostBoot(ctx, log, zkvmMachine, zkvmCluster, domainName, providerID)
 }
 
 // reconcileDelete destroys the libvirt VM and its disk, then removes the finalizer.

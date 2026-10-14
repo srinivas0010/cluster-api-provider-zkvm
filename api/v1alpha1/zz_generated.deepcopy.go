@@ -87,6 +87,21 @@ func (in *ZKVMClusterList) DeepCopyObject() runtime.Object {
 	return nil
 }
 
+// DeepCopyInto copies all properties of Day2BootConfig into another instance.
+func (in *Day2BootConfig) DeepCopyInto(out *Day2BootConfig) {
+	*out = *in
+}
+
+// DeepCopy creates a deep copy of Day2BootConfig.
+func (in *Day2BootConfig) DeepCopy() *Day2BootConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(Day2BootConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
 // DeepCopyInto copies all properties of ZKVMClusterSpec into another ZKVMClusterSpec instance.
 func (in *ZKVMClusterSpec) DeepCopyInto(out *ZKVMClusterSpec) {
 	*out = *in
@@ -94,6 +109,16 @@ func (in *ZKVMClusterSpec) DeepCopyInto(out *ZKVMClusterSpec) {
 		in, out := &in.SSHKeySecretRef, &out.SSHKeySecretRef
 		*out = new(corev1.SecretReference)
 		**out = **in
+	}
+	if in.Day2Boot != nil {
+		in, out := &in.Day2Boot, &out.Day2Boot
+		*out = new(Day2BootConfig)
+		**out = **in
+	}
+	if in.WorkerIPPool != nil {
+		in, out := &in.WorkerIPPool, &out.WorkerIPPool
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 }
 

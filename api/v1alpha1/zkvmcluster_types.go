@@ -95,6 +95,14 @@ type ZKVMClusterSpec struct {
 	// +optional
 	IgnitionBaseURL string `json:"ignitionBaseURL,omitempty"`
 
+	// Day2Boot holds configuration for day-2 worker node replacement via RHCOS
+	// live PXE boot. When set, the controller uses this block instead of the
+	// ABI kernel/initrd for Machines that carry the deployment-name label
+	// (i.e. workers created by a MachineDeployment).
+	// Populated by the installer after install-complete via a patch call.
+	// +optional
+	Day2Boot *Day2BootConfig `json:"day2Boot,omitempty"`
+
 	// WorkerIPPool is an ordered list of IPv4 addresses available for dynamic
 	// assignment to worker ZKVMMachines that have no pre-set ipAddress
 	// (i.e. machines created from a ZKVMMachineTemplate via MachineDeployment).
@@ -111,6 +119,33 @@ type ZKVMClusterSpec struct {
 	// Not used for control-plane nodes — they always have a fixed ipAddress.
 	// +optional
 	WorkerIPPool []string `json:"workerIPPool,omitempty"`
+}
+
+// Day2BootConfig holds the RHCOS live PXE settings used for day-2 worker
+// replacement. All fields are absolute paths or HTTP URLs on the KVM host.
+type Day2BootConfig struct {
+	// KernelPath is the absolute path on the KVM host to the RHCOS live kernel.
+	// Must be readable by the QEMU process (not under /root).
+	// e.g. "/var/lib/libvirt/boot/rhcos-9.8.20260428-0-live-kernel.s390x"
+	KernelPath string `json:"kernelPath"`
+
+	// InitrdPath is the absolute path on the KVM host to the RHCOS live initramfs.
+	// e.g. "/var/lib/libvirt/boot/rhcos-9.8.20260428-0-live-initramfs.s390x.img"
+	InitrdPath string `json:"initrdPath"`
+
+	// RootFSURL is the HTTP URL from which the VM fetches the live rootfs.
+	// e.g. "http://192.168.153.1:9100/rhcos-9.8.20260428-0-live-rootfs.s390x.img"
+	RootFSURL string `json:"rootFSURL"`
+
+	// HTTPBaseURL is the base URL of the HTTP server on the KVM host bridge.
+	// The controller derives the ignition URL as HTTPBaseURL + "/worker.ign".
+	// e.g. "http://192.168.153.1:9100"
+	HTTPBaseURL string `json:"httpBaseURL"`
+
+	// WebRoot is the absolute directory path on the KVM host that the HTTP
+	// service serves. The controller writes worker.ign here before each new VM.
+	// e.g. "/var/lib/libvirt/day2"
+	WebRoot string `json:"webRoot"`
 }
 
 // ZKVMClusterStatus defines the observed state of ZKVMCluster.
