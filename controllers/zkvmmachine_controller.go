@@ -313,12 +313,21 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 			//   XML kernel/initrd and boot from the disk grub directly — proven
 			//   by manual testing (manual-worker-22 reached Ready in ~82s).
 			//
-			// Why OCP rootfs from bastion (not Day2Boot.RootFSURL):
-			//   coreos.live.rootfs_url is what actually gets written to disk and
-			//   runs forever. It must be the OCP-specific RHCOS image (with
-			//   CRI-O, kubelet, MCD). The bastion serves this at RootFSURL.
-			//   Day2Boot.RootFSURL is the generic RHCOS rootfs — used only as a
-			//   fallback if the cluster-level field is unset.
+			// Why generic RHCOS rootfs (Day2Boot.RootFSURL, not ZKVMCluster.Spec.RootFSURL):
+			//   coreos.live.rootfs_url drives two things:
+			//     1. The live environment that coreos-installer runs in.
+			//     2. The s390x partition table layout written to disk.
+			//   The generic RHCOS live rootfs creates the correct GPT layout
+			//   including the PReP boot partition (p1) required by zipl on s390x.
+			//   ZKVMCluster.Spec.RootFSURL points at the ABI bastion rootfs —
+			//   designed for agent-based install, it does not produce a PReP
+			//   partition when used with standalone coreos-installer, leaving
+			//   the disk without a bootloader and causing a ~40s halt on first
+			//   disk boot attempt.
+			//   Proven by manual test: manual-worker-22 used the generic RHCOS
+			//   rootfs, got a correct PReP partition, rebooted from disk, and
+			//   reached Ready. The MCO then upgrades the node to the cluster
+			//   RHCOS version automatically after it joins.
 			//
 			// The only day-2-specific file is worker.ign, which the controller
 			// writes to the KVM host web directory before starting the VM.
@@ -330,13 +339,9 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 			// installed OS as a NetworkManager keyfile — no extra network step needed.
 			d2 := zkvmCluster.Spec.Day2Boot
 			ignURL := d2.HTTPBaseURL + "/worker.ign"
-			// rootfs: use the OCP-specific rootfs served by the bastion HTTPD.
-			// This is what gets written to disk and must contain CRI-O/kubelet/MCD.
-			// Fall back to Day2Boot.RootFSURL only if the cluster-level field is unset.
-			rootfsURL := zkvmCluster.Spec.RootFSURL
-			if rootfsURL == "" {
-				rootfsURL = d2.RootFSURL
-			}
+			// rootfs: use the generic RHCOS live rootfs (Day2Boot.RootFSURL).
+			// This produces the correct s390x GPT layout with PReP boot partition.
+			rootfsURL := d2.RootFSURL
 			cmdline = fmt.Sprintf(
 				"rd.neednet=1 console=ttysclp0 random.trust_cpu=on coreos.inst.install_dev=/dev/vda"+
 					" ip=%s::%s:%s:%s::none nameserver=%s"+
