@@ -7,7 +7,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.17.3
   name: zkvmclusters.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -135,6 +135,14 @@ spec:
                 - rootFSURL
                 - webRoot
                 type: object
+              gatewayIP:
+                description: |-
+                  GatewayIP is the default gateway IP for VMs on the cluster network bridge.
+                  This is the KVM host's bridge-facing IP (e.g. 192.168.153.1), NOT the
+                  bastion IP. It is used as the fallback when a ZKVMMachine has no explicit
+                  gateway set — ensuring VMs can reach the internet for MCD Pull (quay.io).
+                  Populated by the installer from the bastion's default route.
+                type: string
               ignitionBaseURL:
                 description: |-
                   IgnitionBaseURL is the base URL from which nodes fetch their ignition
@@ -206,17 +214,14 @@ spec:
                   assignment to worker ZKVMMachines that have no pre-set ipAddress
                   (i.e. machines created from a ZKVMMachineTemplate via MachineDeployment).
 
-
                   The reconciler scans all ZKVMMachines in the cluster namespace, collects
                   IPs already in use, and claims the first unclaimed IP from this list for
                   each new worker machine. Add extra IPs beyond the initial replica count
                   to allow scale-up without reinstalling.
 
-
                   Example: ip_start=192.168.153.20, ip_count=6 → pool is
                     ["192.168.153.20","192.168.153.21","192.168.153.22",
                      "192.168.153.23","192.168.153.24","192.168.153.25"]
-
 
                   Not used for control-plane nodes — they always have a fixed ipAddress.
                 items:
@@ -259,7 +264,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.17.3
   name: zkvmmachines.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -409,7 +414,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.17.3
   name: zkvmmachinetemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -531,17 +536,42 @@ metadata:
   name: cluster-api-provider-zkvm-manager-role
 rules:
 - apiGroups:
-  - cluster.x-k8s.io
+  - ""
   resources:
-  - clusters
-  - clusters/status
+  - secrets
   verbs:
   - get
   - list
   - watch
 - apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests/approval
+  verbs:
+  - update
+- apiGroups:
+  - certificates.k8s.io
+  resourceNames:
+  - kubernetes.io/kube-apiserver-client-kubelet
+  - kubernetes.io/kubelet-serving
+  resources:
+  - signers
+  verbs:
+  - approve
+- apiGroups:
   - cluster.x-k8s.io
   resources:
+  - clusters
+  - clusters/status
   - machines
   - machines/status
   verbs:
@@ -552,31 +582,6 @@ rules:
   - infrastructure.cluster.x-k8s.io
   resources:
   - zkvmclusters
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - zkvmclusters/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - zkvmclusters/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
   - zkvmmachines
   verbs:
   - create
@@ -589,12 +594,14 @@ rules:
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
+  - zkvmclusters/finalizers
   - zkvmmachines/finalizers
   verbs:
   - update
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
+  - zkvmclusters/status
   - zkvmmachines/status
   verbs:
   - get

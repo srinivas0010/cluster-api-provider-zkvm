@@ -5,17 +5,42 @@ metadata:
   name: cluster-api-provider-zkvm-manager-role
 rules:
 - apiGroups:
-  - cluster.x-k8s.io
+  - ""
   resources:
-  - clusters
-  - clusters/status
+  - secrets
   verbs:
   - get
   - list
   - watch
 - apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests/approval
+  verbs:
+  - update
+- apiGroups:
+  - certificates.k8s.io
+  resourceNames:
+  - kubernetes.io/kube-apiserver-client-kubelet
+  - kubernetes.io/kubelet-serving
+  resources:
+  - signers
+  verbs:
+  - approve
+- apiGroups:
   - cluster.x-k8s.io
   resources:
+  - clusters
+  - clusters/status
   - machines
   - machines/status
   verbs:
@@ -26,31 +51,6 @@ rules:
   - infrastructure.cluster.x-k8s.io
   resources:
   - zkvmclusters
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - zkvmclusters/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - zkvmclusters/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
   - zkvmmachines
   verbs:
   - create
@@ -63,12 +63,14 @@ rules:
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
+  - zkvmclusters/finalizers
   - zkvmmachines/finalizers
   verbs:
   - update
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
+  - zkvmclusters/status
   - zkvmmachines/status
   verbs:
   - get

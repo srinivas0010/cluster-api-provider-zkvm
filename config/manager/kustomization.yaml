@@ -1,9 +1,11 @@
 resources:
-  - manager.yaml
+- manager.yaml
 
 # Substitute the image tag at deploy time.
 # Usage: IMG=registry/image:tag make deploy
 images:
-  - name: cluster-api-provider-zkvm
-    newName: cluster-api-provider-zkvm
-    newTag: dev
+- name: cluster-api-provider-zkvm
+  newName: quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm
+  newTag: v0.1.0
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
