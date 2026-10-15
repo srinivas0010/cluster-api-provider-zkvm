@@ -180,11 +180,17 @@ func (r *ZKVMMachineReconciler) reconcileNormal(
 		if zkvmMachine.Spec.Nameserver == "" {
 			zkvmMachine.Spec.Nameserver = zkvmCluster.Spec.BastionIP
 		}
-		// Gateway fallback: use BastionIP as a best-effort default.
-		// The correct value (KVM host bridge IP) is stamped into the template
-		// by the installer since the new gateway field was added.
+		// Gateway fallback: use GatewayIP from the cluster spec (the KVM host
+		// bridge IP, e.g. 192.168.153.1). Falls back to BastionIP only if
+		// GatewayIP was not populated (old clusters). Using BastionIP as gateway
+		// causes MCD Pull to take up to 9 hours because the bastion does not
+		// route internet traffic — the KVM host does.
 		if zkvmMachine.Spec.Gateway == "" {
-			zkvmMachine.Spec.Gateway = zkvmCluster.Spec.BastionIP
+			if zkvmCluster.Spec.GatewayIP != "" {
+				zkvmMachine.Spec.Gateway = zkvmCluster.Spec.GatewayIP
+			} else {
+				zkvmMachine.Spec.Gateway = zkvmCluster.Spec.BastionIP
+			}
 		}
 		log.Info("Claimed worker IP from pool", "ip", ip, "machine", zkvmMachine.Name)
 	}

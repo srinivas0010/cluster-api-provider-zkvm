@@ -41,6 +41,14 @@ type ZKVMClusterSpec struct {
 	// +optional
 	BastionIP string `json:"bastionIP,omitempty"`
 
+	// GatewayIP is the default gateway IP for VMs on the cluster network bridge.
+	// This is the KVM host's bridge-facing IP (e.g. 192.168.153.1), NOT the
+	// bastion IP. It is used as the fallback when a ZKVMMachine has no explicit
+	// gateway set — ensuring VMs can reach the internet for MCD Pull (quay.io).
+	// Populated by the installer from the bastion's default route.
+	// +optional
+	GatewayIP string `json:"gatewayIP,omitempty"`
+
 	// SSHUser is the username used to SSH into the KVM host (e.g. "root").
 	// +optional
 	SSHUser string `json:"sshUser,omitempty"`

@@ -199,12 +199,16 @@ func (r *ZKVMMachineReconciler) reconcileDay2PostBoot(
 // approveMatchingCSRs lists all pending CertificateSigningRequests on the
 // target cluster and approves those that match the expected node name and IP.
 //
-// Safety check: for each CSR the controller decodes the raw PKCS#10 request
-// and verifies:
-//   - Subject CN = "system:node:<domainName>"
-//   - At least one IP SAN matches the machine's claimed pool IP
+// Two CSR types are handled differently:
 //
-// This prevents approving CSRs from rogue nodes on the same bridge.
+//   - kube-apiserver-client-kubelet (client CSR, round 1):
+//     Submitted by node-bootstrapper on behalf of the new node. Never contains
+//     an IP SAN by design — only the node CN. Approved on CN match alone.
+//
+//   - kubelet-serving (serving CSR, round 2):
+//     Submitted by the node itself after the client cert is issued. Contains
+//     both CN and IP SANs. Approved only when CN AND IP SAN both match —
+//     this prevents approving serving CSRs from rogue nodes on the same bridge.
 func (r *ZKVMMachineReconciler) approveMatchingCSRs(
 	ctx context.Context,
 	log logr.Logger,
@@ -243,8 +247,12 @@ func (r *ZKVMMachineReconciler) approveMatchingCSRs(
 			continue
 		}
 
-		// Check IP SANs — at least one must match.
-		if expectedIP != nil {
+		// For serving CSRs (kubelet-serving signer) verify IP SAN — prevents
+		// approving a serving cert for a rogue node that shares the CN.
+		// For client CSRs (kube-apiserver-client-kubelet signer) CN match is
+		// sufficient — client CSRs never contain IP SANs by design.
+		isServingCSR := csr.Spec.SignerName == "kubernetes.io/kubelet-serving"
+		if isServingCSR && expectedIP != nil {
 			matched := false
 			for _, san := range req.IPAddresses {
 				if san.Equal(expectedIP) {
@@ -253,7 +261,7 @@ func (r *ZKVMMachineReconciler) approveMatchingCSRs(
 				}
 			}
 			if !matched {
-				log.Info("approveMatchingCSRs: CN matches but no IP SAN match — skipping",
+				log.Info("approveMatchingCSRs: serving CSR — CN matches but no IP SAN match — skipping",
 					"csr", csr.Name, "expectedIP", ipAddress)
 				continue
 			}
