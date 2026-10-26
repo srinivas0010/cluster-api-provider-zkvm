@@ -2,3 +2,10 @@ resources:
 - infrastructure.cluster.x-k8s.io_zkvmclusters.yaml
 - infrastructure.cluster.x-k8s.io_zkvmmachines.yaml
 - infrastructure.cluster.x-k8s.io_zkvmmachinetemplates.yaml
+
+# CAPI v1beta1 contract label — required by CAPI core controllers to accept
+# these CRDs as a valid infrastructure provider. Without this label,
+# MachineDeployment blocks creating Machine objects.
+# ref: https://cluster-api.sigs.k8s.io/developer/providers/contracts
+commonLabels:
+  cluster.x-k8s.io/v1beta1: v1alpha1

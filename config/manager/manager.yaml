@@ -73,3 +73,11 @@ spec:
               drop:
                 - ALL
             readOnlyRootFilesystem: true
+          volumeMounts:
+            # /tmp is needed for SSH key temp files. The container runs with
+            # readOnlyRootFilesystem: true so /tmp must be an emptyDir volume.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

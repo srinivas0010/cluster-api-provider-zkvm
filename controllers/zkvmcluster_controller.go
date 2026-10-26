@@ -33,7 +33,11 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -62,6 +66,7 @@ type ZKVMClusterReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=zkvmclusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=zkvmclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=zkvmclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
 
 // Reconcile is the main reconciliation loop for ZKVMCluster.
@@ -206,7 +211,151 @@ func (r *ZKVMClusterReconciler) reconcileNormal(
 		"bridge", zkvmCluster.Spec.NetworkBridge,
 	)
 
+	// ── Auto-patch providerID on control plane OCP nodes ─────────────────────
+	// Once the <cluster>-kubeconfig Secret exists (created manually or by the
+	// installer after install-complete), connect to the target cluster and patch
+	// spec.providerID on any control plane nodes that are missing it.
+	// This allows CAPI's noderef controller to link CP Machines to OCP nodes
+	// (SuccessfulSetNodeRef) without manual oc patch intervention.
+	// Non-fatal: if the Secret doesn't exist yet, requeue after 30s so the
+	// controller retries automatically once the Secret is created.
+	if err := r.reconcileCPProviderIDs(ctx, log, zkvmCluster); err != nil {
+		log.Info("reconcileCPProviderIDs: not ready yet — requeuing", "reason", err.Error())
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// reconcileCPProviderIDs patches spec.providerID on control plane OCP nodes
+// that are missing it. It matches each non-Day2 ZKVMMachine to an OCP node by
+// comparing ZKVMMachine.Spec.IPAddress against node InternalIP addresses.
+//
+// This runs after the KVM host is validated and is non-fatal — if the
+// kubeconfig Secret is not yet available it returns an error and the caller
+// requeues after 30s.
+func (r *ZKVMClusterReconciler) reconcileCPProviderIDs(
+	ctx context.Context,
+	log logr.Logger,
+	zkvmCluster *infrav1.ZKVMCluster,
+) error {
+	// Build target cluster client — returns error if Secret doesn't exist yet.
+	targetClient, err := buildTargetKubeClientFromCluster(ctx, r.Client, zkvmCluster)
+	if err != nil {
+		return fmt.Errorf("kubeconfig Secret not available: %w", err)
+	}
+
+	// List all ZKVMMachines in this cluster's namespace.
+	var machineList infrav1.ZKVMMachineList
+	if err := r.List(ctx, &machineList, client.InNamespace(zkvmCluster.Namespace),
+		client.MatchingLabels{"cluster.x-k8s.io/cluster-name": zkvmCluster.Name}); err != nil {
+		return fmt.Errorf("list ZKVMMachines: %w", err)
+	}
+
+	// List all OCP nodes from target cluster.
+	nodeList, err := targetClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list OCP nodes: %w", err)
+	}
+
+	// Build a map of InternalIP → node name for fast lookup.
+	ipToNode := make(map[string]string, len(nodeList.Items))
+	for _, node := range nodeList.Items {
+		for _, addr := range node.Status.Addresses {
+			if addr.Type == corev1.NodeInternalIP {
+				ipToNode[addr.Address] = node.Name
+			}
+		}
+	}
+
+	for i := range machineList.Items {
+		zm := &machineList.Items[i]
+
+		// Skip Day-2 workers — they are handled by reconcileDay2PostBoot.
+		// A machine is a Day-2 worker if it carries the deployment-name label.
+		if _, isWorker := zm.Labels["cluster.x-k8s.io/deployment-name"]; isWorker {
+			continue
+		}
+
+		// Skip machines with no IP — can't match to a node.
+		if zm.Spec.IPAddress == "" {
+			continue
+		}
+
+		// Find the OCP node whose InternalIP matches this machine's IP.
+		nodeName, ok := ipToNode[zm.Spec.IPAddress]
+		if !ok {
+			log.Info("reconcileCPProviderIDs: no OCP node found for CP machine IP — skipping",
+				"machine", zm.Name, "ip", zm.Spec.IPAddress)
+			continue
+		}
+
+		// Find the node object to check its current providerID.
+		var found *corev1.Node
+		for j := range nodeList.Items {
+			if nodeList.Items[j].Name == nodeName {
+				found = &nodeList.Items[j]
+				break
+			}
+		}
+		if found == nil || found.Spec.ProviderID != "" {
+			// Already patched or not found — nothing to do.
+			continue
+		}
+
+		// Patch providerID: zkvm://<kvmHost>/<machineName>
+		providerID := fmt.Sprintf("zkvm://%s/%s", zkvmCluster.Spec.KVMHost, zm.Name)
+		patchBytes := []byte(fmt.Sprintf(`{"spec":{"providerID":%q}}`, providerID))
+		if _, err := targetClient.CoreV1().Nodes().Patch(
+			ctx, nodeName,
+			types.MergePatchType,
+			patchBytes,
+			metav1.PatchOptions{},
+		); err != nil {
+			log.Error(err, "reconcileCPProviderIDs: patch providerID failed",
+				"node", nodeName, "machine", zm.Name, "providerID", providerID)
+			continue
+		}
+		log.Info("reconcileCPProviderIDs: patched providerID on CP node",
+			"node", nodeName, "machine", zm.Name, "providerID", providerID)
+	}
+
+	return nil
+}
+
+// buildTargetKubeClientFromCluster builds a Kubernetes client for the target
+// cluster by reading the <cluster>-kubeconfig Secret from the management cluster.
+// Returns an error if the Secret does not exist yet — callers should requeue.
+func buildTargetKubeClientFromCluster(
+	ctx context.Context,
+	c client.Client,
+	zkvmCluster *infrav1.ZKVMCluster,
+) (kubernetes.Interface, error) {
+	secretName := zkvmCluster.Name + "-kubeconfig"
+	var secret corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{
+		Namespace: zkvmCluster.Namespace,
+		Name:      secretName,
+	}, &secret); err != nil {
+		return nil, fmt.Errorf("get Secret %s: %w", secretName, err)
+	}
+
+	kubeconfigBytes, ok := secret.Data["value"]
+	if !ok || len(kubeconfigBytes) == 0 {
+		return nil, fmt.Errorf("Secret %s missing key 'value'", secretName)
+	}
+
+	restCfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfigBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse kubeconfig: %w", err)
+	}
+	restCfg.Timeout = 10 * time.Second
+
+	kc, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("new kubernetes client: %w", err)
+	}
+	return kc, nil
 }
 
 // reconcileDelete removes the finalizer so the ZKVMCluster can be garbage collected.
