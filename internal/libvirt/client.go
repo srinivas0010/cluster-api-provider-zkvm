@@ -65,9 +65,9 @@ func NewClientWithAuth(opts ClientOptions) (*Client, error) {
 
 	var uri string
 	if opts.KeyPath != "" {
-		uri = fmt.Sprintf("qemu+ssh://%s@%s/system?keyfile=%s&no_verify=1", user, opts.KVMHost, opts.KeyPath)
+		uri = fmt.Sprintf("qemu+ssh://%s@%s/system?keyfile=%s&no_verify=1&known_hosts=/dev/null", user, opts.KVMHost, opts.KeyPath)
 	} else {
-		uri = fmt.Sprintf("qemu+ssh://%s@%s/system?no_verify=1", user, opts.KVMHost)
+		uri = fmt.Sprintf("qemu+ssh://%s@%s/system?no_verify=1&known_hosts=/dev/null", user, opts.KVMHost)
 	}
 
 	conn, err := libvirtgo.NewConnect(uri)
