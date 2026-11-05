@@ -18,8 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/openshift-smart-installer/cluster-api-provider-zkvm/cmd/bootstrap"
 )
 
 const (
@@ -95,7 +93,7 @@ func runCreate(args []string) {
 
 	// Step 1: Start In-Process Local Control Plane (envtest)
 	log.Info("=== Step 1: Initializing in-process local control plane (envtest) ===")
-	lcp := bootstrap.NewLocalControlPlane(*workDir, log)
+	lcp := NewLocalControlPlane(*workDir, log)
 	if err := lcp.Start(ctx); err != nil {
 		log.Error(err, "Failed to start local control plane")
 		os.Exit(1)
@@ -104,7 +102,7 @@ func runCreate(args []string) {
 
 	// Step 2: Start In-Process ZKVM Controller Manager
 	log.Info("=== Step 2: Starting in-process ZKVM controller manager ===")
-	runner := bootstrap.NewRunner(lcp, log)
+	runner := NewRunner(lcp, log)
 	if err := runner.StartManager(ctx); err != nil {
 		log.Error(err, "Failed to start in-process controller manager")
 		os.Exit(1)
@@ -157,7 +155,7 @@ func runCreate(args []string) {
 	}
 
 	log.Info("=== Step 5: Executing Self-Hosted Pivot to target OpenShift cluster ===", "kubeconfig", *targetKubeconfig)
-	pivotMgr, err := bootstrap.NewPivotManager(lcp, *targetKubeconfig, "default", log)
+	pivotMgr, err := NewPivotManager(lcp, *targetKubeconfig, "default", log)
 	if err != nil {
 		log.Error(err, "Failed to create PivotManager")
 		os.Exit(1)

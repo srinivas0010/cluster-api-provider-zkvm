@@ -56,7 +56,7 @@ build:
 .PHONY: zkvm-installer
 zkvm-installer:
 	## Build the standalone in-process bootstrap CLI for s390x.
-	CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o bin/zkvm-installer ./cmd/bootstrap/main.go
+	CGO_ENABLED=1 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o bin/zkvm-installer ./cmd/bootstrap
 
 # ── Docker / Podman ───────────────────────────────────────────────────────────
 
