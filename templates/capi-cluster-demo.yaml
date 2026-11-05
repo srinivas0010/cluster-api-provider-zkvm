@@ -1,0 +1,242 @@
+# capi-cluster-demo — HA cluster manifest for IBM Z KVM
+# 3 Control Plane nodes (ABI Day-1) + 2 Worker nodes (ABI Day-1, Day-2 on scale)
+# Apply with: kubectl apply -f capi-cluster-demo.yaml --kubeconfig <sno-kubeconfig>
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: zkvm-ssh-key
+  namespace: default
+type: Opaque
+stringData:
+  ssh-privatekey: |
+    REPLACE_SSH_PRIVATE_KEY
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMCluster
+metadata:
+  name: capi-cluster-demo
+  namespace: default
+spec:
+  kvmHost: "172.23.228.69"
+  sshUser: "root"
+  sshKeySecretRef:
+    name: "zkvm-ssh-key"
+  storagePool: "ocpz-aio-sno-vdisk"
+  networkBridge: "capibridge"
+  kernelPath: "/var/lib/libvirt/boot/agent.s390x-kernel.img"
+  initrdPath: "/var/lib/libvirt/boot/agent.s390x-initrd.img"
+  rootFSURL: "http://192.168.153.5:8080/rootfs.img"
+  bastionIP: "192.168.153.5"
+  gatewayIP: "192.168.153.1"
+  controlPlaneEndpoint:
+    host: "api.capi-cluster-demo.cp.testing"
+    port: 6443
+  workerIPPool:
+    - "192.168.153.30"
+    - "192.168.153.31"
+    - "192.168.153.32"
+    - "192.168.153.33"
+    - "192.168.153.34"
+    - "192.168.153.35"
+    - "192.168.153.36"
+    - "192.168.153.37"
+    - "192.168.153.38"
+    - "192.168.153.39"
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: capi-cluster-demo
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: "api.capi-cluster-demo.cp.testing"
+    port: 6443
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: ZKVMCluster
+    name: capi-cluster-demo
+    namespace: default
+---
+# ── Control Plane Node 0 ──────────────────────────────────────────────────────
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMMachine
+metadata:
+  name: capi-cluster-demo-cp-0
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+spec:
+  vcpus: 4
+  memoryGB: 16
+  diskGB: 120
+  ipAddress: "192.168.153.10"
+  nameserver: "192.168.153.5"
+  gateway: "192.168.153.1"
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Machine
+metadata:
+  name: capi-cluster-demo-cp-0
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+    cluster.x-k8s.io/control-plane: ""
+spec:
+  clusterName: capi-cluster-demo
+  bootstrap:
+    dataSecretName: ""
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: ZKVMMachine
+    name: capi-cluster-demo-cp-0
+    namespace: default
+---
+# ── Control Plane Node 1 ──────────────────────────────────────────────────────
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMMachine
+metadata:
+  name: capi-cluster-demo-cp-1
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+spec:
+  vcpus: 4
+  memoryGB: 16
+  diskGB: 120
+  ipAddress: "192.168.153.11"
+  nameserver: "192.168.153.5"
+  gateway: "192.168.153.1"
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Machine
+metadata:
+  name: capi-cluster-demo-cp-1
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+    cluster.x-k8s.io/control-plane: ""
+spec:
+  clusterName: capi-cluster-demo
+  bootstrap:
+    dataSecretName: ""
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: ZKVMMachine
+    name: capi-cluster-demo-cp-1
+    namespace: default
+---
+# ── Control Plane Node 2 ──────────────────────────────────────────────────────
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMMachine
+metadata:
+  name: capi-cluster-demo-cp-2
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+spec:
+  vcpus: 4
+  memoryGB: 16
+  diskGB: 120
+  ipAddress: "192.168.153.12"
+  nameserver: "192.168.153.5"
+  gateway: "192.168.153.1"
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Machine
+metadata:
+  name: capi-cluster-demo-cp-2
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+    cluster.x-k8s.io/control-plane: ""
+spec:
+  clusterName: capi-cluster-demo
+  bootstrap:
+    dataSecretName: ""
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: ZKVMMachine
+    name: capi-cluster-demo-cp-2
+    namespace: default
+---
+# ── Worker MachineDeployment ──────────────────────────────────────────────────
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ZKVMMachineTemplate
+metadata:
+  name: capi-cluster-demo-worker-template
+  namespace: default
+spec:
+  template:
+    spec:
+      vcpus: 4
+      memoryGB: 16
+      diskGB: 120
+      nameserver: "192.168.153.5"
+      gateway: "192.168.153.1"
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: capi-cluster-demo-worker-bootstrap
+  namespace: default
+spec:
+  template:
+    spec: {}
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineDeployment
+metadata:
+  name: capi-cluster-demo-workers-0
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: capi-cluster-demo
+spec:
+  clusterName: capi-cluster-demo
+  replicas: 2
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: capi-cluster-demo
+      cluster.x-k8s.io/deployment-name: capi-cluster-demo-workers-0
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: capi-cluster-demo
+        cluster.x-k8s.io/deployment-name: capi-cluster-demo-workers-0
+    spec:
+      clusterName: capi-cluster-demo
+      version: "v1.30.14"
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          kind: KubeadmConfigTemplate
+          name: capi-cluster-demo-worker-bootstrap
+          namespace: default
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+        kind: ZKVMMachineTemplate
+        name: capi-cluster-demo-worker-template
+        namespace: default
+---
+# ── MachineHealthCheck for workers ───────────────────────────────────────────
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineHealthCheck
+metadata:
+  name: capi-cluster-demo-workers-0-mhc
+  namespace: default
+spec:
+  clusterName: capi-cluster-demo
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: capi-cluster-demo
+      cluster.x-k8s.io/deployment-name: capi-cluster-demo-workers-0
+  unhealthyConditions:
+    - type: Ready
+      status: "False"
+      timeout: 300s
+    - type: Ready
+      status: Unknown
+      timeout: 300s
+  maxUnhealthy: "100%"
+  nodeStartupTimeout: 30m

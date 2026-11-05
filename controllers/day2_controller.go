@@ -152,13 +152,17 @@ func (r *ZKVMMachineReconciler) reconcileDay2PostBoot(
 	}
 
 	// Check whether the Node exists and is Ready.
-	node, err := targetClient.CoreV1().Nodes().Get(ctx, domainName, metav1.GetOptions{})
+	// Uses multi-tier resolution:
+	//   1. Exact match by domainName
+	//   2. Match by spec.providerID
+	//   3. Match by internal IP address
+	node, err := r.findMatchingNode(ctx, targetClient, domainName, providerID, zkvmMachine.Spec.IPAddress)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			log.Info("reconcileDay2PostBoot: Node not yet registered — requeuing", "node", domainName)
-		} else {
-			log.Error(err, "reconcileDay2PostBoot: get Node error — requeuing")
-		}
+		log.Error(err, "reconcileDay2PostBoot: findMatchingNode error — requeuing")
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+	if node == nil {
+		log.Info("reconcileDay2PostBoot: Node not yet registered — requeuing", "node", domainName)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -170,7 +174,7 @@ func (r *ZKVMMachineReconciler) reconcileDay2PostBoot(
 		}
 	}
 	if !nodeReady {
-		log.Info("reconcileDay2PostBoot: Node exists but not yet Ready — requeuing", "node", domainName)
+		log.Info("reconcileDay2PostBoot: Node exists but not yet Ready — requeuing", "node", node.Name)
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
@@ -178,7 +182,7 @@ func (r *ZKVMMachineReconciler) reconcileDay2PostBoot(
 	if node.Spec.ProviderID == "" {
 		patch := fmt.Sprintf(`{"spec":{"providerID":%q}}`, providerID)
 		if _, err := targetClient.CoreV1().Nodes().Patch(
-			ctx, domainName,
+			ctx, node.Name,
 			types.MergePatchType,
 			[]byte(patch),
 			metav1.PatchOptions{},
@@ -186,14 +190,63 @@ func (r *ZKVMMachineReconciler) reconcileDay2PostBoot(
 			log.Error(err, "reconcileDay2PostBoot: patch providerID failed — requeuing")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 		}
-		log.Info("reconcileDay2PostBoot: providerID patched on Node", "node", domainName, "providerID", providerID)
+		log.Info("reconcileDay2PostBoot: providerID patched on Node", "node", node.Name, "providerID", providerID)
 	}
 
 	// All done.
 	zkvmMachine.Status.Ready = true
 	log.Info("ZKVMMachine ready (day-2 path) — Node Ready and providerID set",
-		"domain", domainName, "providerID", providerID)
+		"node", node.Name, "domain", domainName, "providerID", providerID)
 	return ctrl.Result{}, nil
+}
+
+// findMatchingNode resolves a Node in the target cluster using a 3-tier fallback strategy:
+// 1. Exact node name match (domainName)
+// 2. Matching node.Spec.ProviderID == providerID
+// 3. Matching node internal IP address == ipAddress
+func (r *ZKVMMachineReconciler) findMatchingNode(
+	ctx context.Context,
+	targetClient kubernetes.Interface,
+	domainName string,
+	providerID string,
+	ipAddress string,
+) (*corev1.Node, error) {
+	// Tier 1: Try exact node name match
+	node, err := targetClient.CoreV1().Nodes().Get(ctx, domainName, metav1.GetOptions{})
+	if err == nil {
+		return node, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("get node by name %q: %w", domainName, err)
+	}
+
+	// Tier 2 & 3: List all nodes and inspect ProviderID and IP addresses
+	nodes, err := targetClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list nodes: %w", err)
+	}
+
+	// Check ProviderID first (most deterministic)
+	if providerID != "" {
+		for i := range nodes.Items {
+			if nodes.Items[i].Spec.ProviderID == providerID {
+				return &nodes.Items[i], nil
+			}
+		}
+	}
+
+	// Fallback to internal IP match
+	if ipAddress != "" {
+		for i := range nodes.Items {
+			for _, addr := range nodes.Items[i].Status.Addresses {
+				if addr.Type == corev1.NodeInternalIP && addr.Address == ipAddress {
+					return &nodes.Items[i], nil
+				}
+			}
+		}
+	}
+
+	return nil, nil
 }
 
 // approveMatchingCSRs lists all pending CertificateSigningRequests on the

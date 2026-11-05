@@ -1,0 +1,720 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: capi-zkvm-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.3
+  labels:
+    cluster.x-k8s.io/v1beta1: v1alpha1
+  name: zkvmclusters.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ZKVMCluster
+    listKind: ZKVMClusterList
+    plural: zkvmclusters
+    singular: zkvmcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.labels['cluster\.x-k8s\.io/cluster-name']
+      name: Cluster
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: string
+    - jsonPath: .spec.kvmHost
+      name: KVMHost
+      type: string
+    - jsonPath: .spec.bastionIP
+      name: BastionIP
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZKVMCluster is the schema for the zkvmclusters API.
+          It represents the KVM host environment (LPAR + libvirt) that backs a cluster.
+          One ZKVMCluster exists per target cluster.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ZKVMClusterSpec defines the desired state of ZKVMCluster.
+              It describes the KVM host environment that will back a CAPI-managed cluster.
+            properties:
+              bastionIP:
+                description: |-
+                  BastionIP is the IP address of the dedicated bastion VM for this cluster.
+                  The bastion runs HAProxy (ports 6443, 22623, 443, 80), named (DNS), and
+                  HTTPD (port 8080 for rootfs serving). It is a KVM VM on the same network
+                  bridge as the target cluster nodes and is provisioned exclusively for
+                  this cluster — it is not shared with any other cluster.
+                  This field is informational — the installer configures the bastion before
+                  applying CAPI manifests. The controller does not connect to the bastion.
+                type: string
+              controlPlaneEndpoint:
+                description: |-
+                  ControlPlaneEndpoint is the IP and port of the Kubernetes API server
+                  for the target cluster. This is the IP of the first control-plane VM.
+                properties:
+                  host:
+                    description: The hostname on which the API server is serving.
+                    type: string
+                  port:
+                    description: The port on which the API server is serving.
+                    format: int32
+                    type: integer
+                required:
+                - host
+                - port
+                type: object
+              day2Boot:
+                description: |-
+                  Day2Boot holds configuration for day-2 worker node replacement via RHCOS
+                  live PXE boot. When set, the controller uses this block instead of the
+                  ABI kernel/initrd for Machines that carry the deployment-name label
+                  (i.e. workers created by a MachineDeployment).
+                  Populated by the installer after install-complete via a patch call.
+                properties:
+                  httpBaseURL:
+                    description: |-
+                      HTTPBaseURL is the base URL of the HTTP server on the KVM host bridge.
+                      The controller derives the ignition URL as HTTPBaseURL + "/worker.ign".
+                      e.g. "http://192.168.153.1:9100"
+                    type: string
+                  initrdPath:
+                    description: |-
+                      InitrdPath is the absolute path on the KVM host to the RHCOS live initramfs.
+                      e.g. "/var/lib/libvirt/boot/rhcos-9.8.20260428-0-live-initramfs.s390x.img"
+                    type: string
+                  kernelPath:
+                    description: |-
+                      KernelPath is the absolute path on the KVM host to the RHCOS live kernel.
+                      Must be readable by the QEMU process (not under /root).
+                      e.g. "/var/lib/libvirt/boot/rhcos-9.8.20260428-0-live-kernel.s390x"
+                    type: string
+                  rootFSURL:
+                    description: |-
+                      RootFSURL is the HTTP URL from which the VM fetches the live rootfs.
+                      e.g. "http://192.168.153.1:9100/rhcos-9.8.20260428-0-live-rootfs.s390x.img"
+                    type: string
+                  webRoot:
+                    description: |-
+                      WebRoot is the absolute directory path on the KVM host that the HTTP
+                      service serves. The controller writes worker.ign here before each new VM.
+                      e.g. "/var/lib/libvirt/day2"
+                    type: string
+                required:
+                - httpBaseURL
+                - initrdPath
+                - kernelPath
+                - rootFSURL
+                - webRoot
+                type: object
+              gatewayIP:
+                description: |-
+                  GatewayIP is the default gateway IP for VMs on the cluster network bridge.
+                  This is the KVM host's bridge-facing IP (e.g. 192.168.153.1), NOT the
+                  bastion IP. It is used as the fallback when a ZKVMMachine has no explicit
+                  gateway set — ensuring VMs can reach the internet for MCD Pull (quay.io).
+                  Populated by the installer from the bastion's default route.
+                type: string
+              ignitionBaseURL:
+                description: |-
+                  IgnitionBaseURL is the base URL from which nodes fetch their ignition
+                  configuration during first boot. Optional — ABI ignition is embedded
+                  in the initrd and does not require an external URL. This field is
+                  preserved for future use cases that may serve per-node ignition files.
+                type: string
+              initrdPath:
+                description: |-
+                  InitrdPath is the absolute path on the KVM host to the initrd image
+                  used for direct-kernel boot of all VMs in this cluster.
+                  Populated by the installer's UploadArtifacts step, e.g. "/var/lib/libvirt/boot/agent.s390x-initrd.img".
+                  All VMs in the cluster use the same initrd image.
+                type: string
+              kernelPath:
+                description: |-
+                  KernelPath is the absolute path on the KVM host to the s390x kernel image
+                  used for direct-kernel boot of all VMs in this cluster.
+                  Populated by the installer's UploadArtifacts step, e.g. "/var/lib/libvirt/boot/agent.s390x-kernel.img".
+                  All VMs in the cluster boot the same kernel image.
+                type: string
+              kvmHost:
+                description: |-
+                  KVMHost is the hostname or IP address of the KVM host LPAR.
+                  The controller connects here via: qemu+ssh://<user>@<KVMHost>/system
+                type: string
+              networkBridge:
+                description: |-
+                  NetworkBridge is the name of the Linux bridge interface on the KVM host
+                  that VM virtual NICs will be attached to.
+                  Must be a bridge connected to the physical network (not virbr0/NAT).
+                  Verify with: ip link show <bridge>
+                type: string
+              rootFSURL:
+                description: |-
+                  RootFSURL is the HTTP URL from which nodes fetch the live rootfs image
+                  (agent.s390x-rootfs.img) during direct-kernel PXE boot.
+                  e.g. "http://192.168.152.2:8080/rootfs.img".
+                  Appended to the kernel cmdline as: coreos.live.rootfs_url=<RootFSURL>
+                type: string
+              sshKeySecretRef:
+                description: |-
+                  SSHKeySecretRef is a reference to a Secret containing the SSH private key
+                  used to authenticate to the KVM host. The secret must contain key "ssh-privatekey".
+                properties:
+                  name:
+                    description: name is unique within a namespace to reference a
+                      secret resource.
+                    type: string
+                  namespace:
+                    description: namespace defines the space within which the secret
+                      name must be unique.
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              sshUser:
+                description: SSHUser is the username used to SSH into the KVM host
+                  (e.g. "root").
+                type: string
+              storagePool:
+                description: |-
+                  StoragePool is the name of the libvirt storage pool where VM disk images
+                  (qcow2) will be created. Must already exist on the KVM host.
+                  Verify with: virsh pool-list --all
+                type: string
+              workerIPPool:
+                description: |-
+                  WorkerIPPool is an ordered list of IPv4 addresses available for dynamic
+                  assignment to worker ZKVMMachines that have no pre-set ipAddress
+                  (i.e. machines created from a ZKVMMachineTemplate via MachineDeployment).
+
+                  The reconciler scans all ZKVMMachines in the cluster namespace, collects
+                  IPs already in use, and claims the first unclaimed IP from this list for
+                  each new worker machine. Add extra IPs beyond the initial replica count
+                  to allow scale-up without reinstalling.
+
+                  Example: ip_start=192.168.153.20, ip_count=6 → pool is
+                    ["192.168.153.20","192.168.153.21","192.168.153.22",
+                     "192.168.153.23","192.168.153.24","192.168.153.25"]
+
+                  Not used for control-plane nodes — they always have a fixed ipAddress.
+                items:
+                  type: string
+                type: array
+            required:
+            - controlPlaneEndpoint
+            - initrdPath
+            - kernelPath
+            - kvmHost
+            - networkBridge
+            - storagePool
+            type: object
+          status:
+            description: ZKVMClusterStatus defines the observed state of ZKVMCluster.
+            properties:
+              failureMessage:
+                description: FailureMessage contains a human-readable description
+                  of the failure.
+                type: string
+              failureReason:
+                description: |-
+                  FailureReason contains a short machine-readable string explaining why
+                  the cluster failed to reach the Ready state.
+                type: string
+              ready:
+                description: |-
+                  Ready indicates whether the KVM host is reachable and the storage pool
+                  and network bridge have been validated. Set to true by the reconciler
+                  once all checks pass. CAPI core waits for this before creating machines.
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.3
+  labels:
+    cluster.x-k8s.io/v1beta1: v1alpha1
+  name: zkvmmachines.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ZKVMMachine
+    listKind: ZKVMMachineList
+    plural: zkvmmachines
+    singular: zkvmmachine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.labels['cluster\.x-k8s\.io/cluster-name']
+      name: Cluster
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: string
+    - jsonPath: .spec.providerID
+      name: ProviderID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZKVMMachine is the schema for the zkvmmachines API.
+          Each ZKVMMachine maps 1:1 to a libvirt KVM virtual machine on the KVM host.
+          Created automatically by KubeadmControlPlane/MachineDeployment — not by users.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              ZKVMMachineSpec defines the desired state of ZKVMMachine.
+              Each ZKVMMachine corresponds to exactly one KVM virtual machine on the KVM host.
+              ZKVMMachine objects are created automatically by KubeadmControlPlane or
+              MachineDeployment — users do not create them directly.
+            properties:
+              diskGB:
+                description: |-
+                  DiskGB is the size of the root disk image (qcow2) in gigabytes.
+                  Minimum 120 for control-plane nodes, 50 for workers.
+                minimum: 1
+                type: integer
+              gateway:
+                description: Gateway is the network gateway for static IP configuration.
+                type: string
+              ipAddress:
+                description: IPAddress is the static IP to assign to the VM if static
+                  NAT IP allocation is used.
+                type: string
+              memoryGB:
+                description: |-
+                  MemoryGB is the amount of RAM in gigabytes to assign to the VM.
+                  Minimum 16 for control-plane nodes, 8 for workers.
+                minimum: 1
+                type: integer
+              nameserver:
+                description: Nameserver is the DNS nameserver for static IP configuration.
+                type: string
+              netmask:
+                description: Netmask is the network mask for static IP configuration
+                  (e.g. "255.255.255.0").
+                type: string
+              providerID:
+                description: |-
+                  ProviderID is the unique identifier for this machine in the format
+                  "zkvm://<kvmHost>/<domainName>". Set by the reconciler after the VM
+                  is created. Used by the Node object to match back to this Machine.
+                type: string
+              vcpus:
+                description: |-
+                  VCPUs is the number of virtual CPUs to assign to the VM.
+                  Minimum 4 for control-plane nodes, 2 for workers.
+                minimum: 1
+                type: integer
+            required:
+            - diskGB
+            - memoryGB
+            - vcpus
+            type: object
+          status:
+            description: ZKVMMachineStatus defines the observed state of ZKVMMachine.
+            properties:
+              addresses:
+                description: |-
+                  Addresses holds the IP addresses assigned to this VM.
+                  Populated after the VM is created and its NIC is assigned.
+                items:
+                  description: MachineAddress contains information for the node's
+                    address.
+                  properties:
+                    address:
+                      description: The machine address.
+                      type: string
+                    type:
+                      description: Machine address type, one of Hostname, ExternalIP,
+                        InternalIP, ExternalDNS or InternalDNS.
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              failureMessage:
+                description: FailureMessage contains a human-readable explanation
+                  of the failure.
+                type: string
+              failureReason:
+                description: |-
+                  FailureReason contains a short machine-readable string describing why
+                  this machine failed (e.g. "VolumeCreateFailed", "DomainStartFailed").
+                type: string
+              ready:
+                description: |-
+                  Ready indicates whether the VM has been created and has joined the cluster.
+                  Set to true by the reconciler after DomainCreate succeeds and the node
+                  appears in the target cluster.
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.3
+  labels:
+    cluster.x-k8s.io/v1beta1: v1alpha1
+  name: zkvmmachinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: ZKVMMachineTemplate
+    listKind: ZKVMMachineTemplateList
+    plural: zkvmmachinetemplates
+    singular: zkvmmachinetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ZKVMMachineTemplate is the schema for the zkvmmachinetemplates API.
+          It is a reusable blueprint that KubeadmControlPlane and MachineDeployment
+          reference via machineTemplate.infrastructureRef.
+          Defines the VM size (vcpus, memoryGB, diskGB) for a group of cluster nodes.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ZKVMMachineTemplateSpec defines the desired state of ZKVMMachineTemplate.
+            properties:
+              template:
+                description: Template is the ZKVMMachineSpec blueprint.
+                properties:
+                  spec:
+                    description: |-
+                      Spec is the ZKVMMachineSpec that all machines created from this template
+                      will use. Fields here are copied directly into each ZKVMMachine created.
+                    properties:
+                      diskGB:
+                        description: |-
+                          DiskGB is the size of the root disk image (qcow2) in gigabytes.
+                          Minimum 120 for control-plane nodes, 50 for workers.
+                        minimum: 1
+                        type: integer
+                      gateway:
+                        description: Gateway is the network gateway for static IP
+                          configuration.
+                        type: string
+                      ipAddress:
+                        description: IPAddress is the static IP to assign to the VM
+                          if static NAT IP allocation is used.
+                        type: string
+                      memoryGB:
+                        description: |-
+                          MemoryGB is the amount of RAM in gigabytes to assign to the VM.
+                          Minimum 16 for control-plane nodes, 8 for workers.
+                        minimum: 1
+                        type: integer
+                      nameserver:
+                        description: Nameserver is the DNS nameserver for static IP
+                          configuration.
+                        type: string
+                      netmask:
+                        description: Netmask is the network mask for static IP configuration
+                          (e.g. "255.255.255.0").
+                        type: string
+                      providerID:
+                        description: |-
+                          ProviderID is the unique identifier for this machine in the format
+                          "zkvm://<kvmHost>/<domainName>". Set by the reconciler after the VM
+                          is created. Used by the Node object to match back to this Machine.
+                        type: string
+                      vcpus:
+                        description: |-
+                          VCPUs is the number of virtual CPUs to assign to the VM.
+                          Minimum 4 for control-plane nodes, 2 for workers.
+                        minimum: 1
+                        type: integer
+                    required:
+                    - diskGB
+                    - memoryGB
+                    - vcpus
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cluster-api-provider-zkvm-controller-manager
+  namespace: capi-zkvm-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-api-provider-zkvm-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests/approval
+  verbs:
+  - update
+- apiGroups:
+  - certificates.k8s.io
+  resourceNames:
+  - kubernetes.io/kube-apiserver-client-kubelet
+  - kubernetes.io/kubelet-serving
+  resources:
+  - signers
+  verbs:
+  - approve
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - clusters/status
+  - machines
+  - machines/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - zkvmclusters
+  - zkvmmachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - zkvmclusters/finalizers
+  - zkvmmachines/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - zkvmclusters/status
+  - zkvmmachines/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-api-provider-zkvm-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-api-provider-zkvm-manager-role
+subjects:
+- kind: ServiceAccount
+  name: cluster-api-provider-zkvm-controller-manager
+  namespace: capi-zkvm-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: controller-manager
+    app.kubernetes.io/name: cluster-api-provider-zkvm
+    control-plane: controller-manager
+  name: cluster-api-provider-zkvm-controller-manager
+  namespace: capi-zkvm-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --leader-elect
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        command:
+        - /manager
+        env:
+        - name: OCPZ_KVM_USER
+          valueFrom:
+            secretKeyRef:
+              key: kvm-user
+              name: zkvm-credentials
+              optional: true
+        image: quay.io/rh-ee-dveerabh/cluster-api-provider-zkvm:v0.1.0
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      serviceAccountName: cluster-api-provider-zkvm-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - emptyDir: {}
+        name: tmp
