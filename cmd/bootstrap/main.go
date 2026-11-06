@@ -59,6 +59,11 @@ Options:
 }
 
 func runCreate(args []string) {
+	// If sub-command "cluster" is present, skip it
+	if len(args) > 0 && args[0] == "cluster" {
+		args = args[1:]
+	}
+
 	fs := flag.NewFlagSet("create cluster", flag.ExitOnError)
 	manifestPath := fs.String("manifest", "", "Path to CAPI cluster manifest YAML")
 	targetKubeconfig := fs.String("target-kubeconfig", "", "Path to target cluster kubeconfig")
@@ -83,6 +88,7 @@ func runCreate(args []string) {
 		os.Exit(1)
 	}
 	log := zapr.NewLogger(zapLog)
+	ctrl.SetLogger(log)
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -123,6 +129,11 @@ func runCreate(args []string) {
 		os.Exit(1)
 	}
 
+	if apiEndpoint == "" {
+		log.Error(fmt.Errorf("no controlPlaneEndpoint found in manifest"), "Manifest must define controlPlaneEndpoint on ZKVMCluster or Cluster")
+		os.Exit(1)
+	}
+
 	if err := runner.ApplyObjects(ctx, objs); err != nil {
 		log.Error(err, "Failed to apply objects to local control plane")
 		os.Exit(1)
@@ -131,10 +142,6 @@ func runCreate(args []string) {
 	log.Info("CAPI cluster objects applied. ZKVM controller is provisioning VMs on KVM host...")
 
 	// Step 4: Wait for Target OpenShift Control Plane Ready
-	if apiEndpoint == "" {
-		apiEndpoint = "api.capi-cluster-demo.cp.testing:6443"
-	}
-
 	log.Info("=== Step 4: Monitoring target cluster installation ===", "apiEndpoint", apiEndpoint)
 	if err := runner.WaitForTargetAPIServer(ctx, apiEndpoint, *timeout); err != nil {
 		log.Error(err, "Target cluster failed to become ready")
